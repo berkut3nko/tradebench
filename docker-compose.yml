@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Database for financial data and user auth
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_DB=analyzer_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # Message broker for real-time notifications
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # C++ Analytical Core
+  cpp-engine:
+    build:
+      context: ./cpp-core
+      dockerfile: dockerfile # Посилаємось на твій файл з малої літери
+    volumes:
+      - ./cpp-core:/app/cpp-core
+      - ./proto:/app/proto
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DB_CONNECTION=postgresql://user:pass@db:5432/analyzer_db
+      - REDIS_HOST=redis
+
+  # PHP Backend (Placeholder for now)
+  php-app:
+    build:
+      context: ./php-app
+    volumes:
+      - ./php-app:/var/www/html
+      - ./proto:/app/proto
+    depends_on:
+      - db
+      - cpp-engine
