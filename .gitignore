@@ -1,0 +1,53 @@
+#Environments and secrets
+
+.env
+.env.local
+.env.testing
+
+#PHP / Composer
+
+php-app/vendor/
+php-app/.composer/
+php-app/composer.lock
+.php-cs-fixer.cache
+
+#C++ / CMake
+
+cpp-core/build/
+cpp-core/.cache/
+cpp-core/bin/
+cpp-core/lib/
+CMakeCache.txt
+CMakeFiles/
+CMakeSettings.json
+*.o
+*.a
+*.so
+*.exe
+*.out
+
+#gRPC Generated files (should be generated on build)
+
+php-app/proto/*
+!php-app/proto/.gitkeep
+cpp-core/proto/*
+!cpp-core/proto/.gitkeep
+
+#Docker
+
+.docker/
+*/.docker/
+
+#IDEs and System files
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+#Documentation
+
+docs/doxygen/html/
+docs/doxygen/latex/
