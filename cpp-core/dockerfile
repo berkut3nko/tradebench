@@ -1,0 +1,32 @@
+# Use Ubuntu 22.04 as a stable base for C++ development
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install essential build tools and dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    pkg-config \
+    libgrpc++-dev \
+    protobuf-compiler-grpc \
+    libprotobuf-dev \
+    libpqxx-dev \
+    libhiredis-dev \
+    libgtest-dev \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build and install GoogleTest from source (required on some Ubuntu versions)
+RUN cd /usr/src/googletest && \
+    cmake . && \
+    make && \
+    cp lib/*.a /usr/lib
+
+# Set the working directory inside the container
+WORKDIR /app/cpp-core
+
+# Default command: build the project and run tests
+CMD ["/bin/bash"]
