@@ -25,3 +25,7 @@ make
 exit
 ``` 
 `or Ctrl-D`
+# Requirements
+```text
+docker, postgres, doxygen, git, nginx, protoc
+```
