@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package analyzer;
+
+/* Define namespaces for PHP PSR-4 autoloading */
+option php_namespace = "Analyzer";
+option php_metadata_namespace = "GPBMetadata";
+
+/**
+ * @brief Service for triggering backtesting simulations.
+ */
+service AnalysisService {
+  /**
+   * @brief Starts a new backtesting task.
+   */
+  rpc StartAnalysis (AnalysisRequest) returns (AnalysisResponse);
+}
+
+/**
+ * @brief Request containing strategy parameters.
+ */
+message AnalysisRequest {
+  string user_id = 1;
+  string currency_pair = 2;
+  int64 start_timestamp = 3;
+  int64 end_timestamp = 4;
+  string strategy_name = 5;
+}
+
+/**
+ * @brief Immediate response acknowledging the task.
+ */
+message AnalysisResponse {
+  string task_id = 1;
+  bool accepted = 2;
+  string message = 3;
+}
