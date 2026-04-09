@@ -4,6 +4,9 @@
 docker compose build cpp-engine
 docker compose run cpp-engine bash
 ```
+```bash
+docker compose exec php-app composer install --no-security-blocking
+```
 ## C++ setup
 ### Build
 ```bash
