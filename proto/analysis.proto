@@ -25,6 +25,8 @@ message AnalysisRequest {
   int64 start_timestamp = 3;
   int64 end_timestamp = 4;
   string strategy_name = 5;
+  /* Added task_id to pass the real DB identifier */
+  string task_id = 6;
 }
 
 /**

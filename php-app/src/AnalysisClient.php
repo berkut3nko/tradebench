@@ -22,26 +22,36 @@ class AnalysisClient {
     }
 
     /**
-     * @brief Sends a backtesting request to the core.
+     * @brief Sends a backtesting request to the core with dynamic parameters.
      * @param string $userId
      * @param string $pair
      * @param string $strategy
+     * @param string $taskId
+     * @param array $dateRange Associative array with 'start' and 'end' timestamps
      * @return array
      */
-    public function requestAnalysis(string $userId, string $pair, string $strategy): array {
+    public function requestAnalysis(string $userId, string $pair, string $strategy, string $taskId, array $dateRange = []): array {
         $request = new AnalysisRequest();
         $request->setUserId($userId);
         $request->setCurrencyPair($pair);
         $request->setStrategyName($strategy);
-        $request->setStartTimestamp(time() - 86400);
-        $request->setEndTimestamp(time());
+        
+        // Use provided timestamps or default to the last 30 days
+        $start = $dateRange['start'] ?? (time() - (86400 * 30));
+        $end = $dateRange['end'] ?? time();
+        
+        $request->setStartTimestamp($start);
+        $request->setEndTimestamp($end);
+        $request->setTaskId($taskId);
 
-        list($response, $status) = $this->client->StartAnalysis($request)->wait();
+        // Added a timeout of 5 seconds (5,000,000 microseconds) to prevent PHP from hanging
+        list($response, $status) = $this->client->StartAnalysis($request, [], ['timeout' => 5000000])->wait();
 
         if ($status->code !== 0) {
             return [
                 'success' => false,
-                'error' => $status->details
+                'error' => $status->details,
+                'code' => $status->code
             ];
         }
 

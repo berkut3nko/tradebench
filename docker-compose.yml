@@ -1,5 +1,4 @@
 services:
-  # Database for financial data and user auth
   db:
     image: postgres:15-alpine
     environment:
@@ -11,13 +10,11 @@ services:
     volumes:
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
 
-  # Message broker for real-time notifications
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
 
-  # C++ Analytical Core
   cpp-engine:
     build:
       context: ./cpp-core
@@ -28,11 +25,12 @@ services:
     depends_on:
       - db
       - redis
+    tty: true
+    stdin_open: true
     environment:
       - DB_CONNECTION=postgresql://user:pass@db:5432/analyzer_db
       - REDIS_HOST=redis
 
-  # PHP Backend
   php-app:
     build:
       context: ./php-app
@@ -42,3 +40,13 @@ services:
     depends_on:
       - db
       - cpp-engine
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8081:80"
+    volumes:
+      - ./php-app:/var/www/html
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - php-app

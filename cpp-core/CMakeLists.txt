@@ -11,6 +11,7 @@ file(MAKE_DIRECTORY ${PROTO_SRC_DIR})
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(pqxx REQUIRED libpqxx)
+pkg_check_modules(hiredis REQUIRED hiredis)
 find_package(GTest REQUIRED)
 
 find_program(PROTOC_EXECUTABLE protoc)
@@ -48,6 +49,7 @@ add_executable(tradebench_core ${SOURCES})
 target_link_libraries(tradebench_core 
     PRIVATE 
     ${pqxx_LIBRARIES}
+    ${hiredis_LIBRARIES}
     Threads::Threads
     grpc++
     protobuf
