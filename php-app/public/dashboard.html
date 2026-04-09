@@ -8,9 +8,34 @@
 </head>
 <body class="bg-gray-900 text-white font-sans min-h-screen p-8">
 
-    <div class="max-w-4xl mx-auto">
-        <header class="mb-10 border-b border-gray-800 pb-4">
+    <!-- Auth View -->
+    <div id="authView" class="max-w-md mx-auto mt-20 bg-gray-800 p-8 rounded-xl border border-gray-700">
+        <h1 class="text-3xl font-bold text-blue-500 mb-6 text-center">TradeBench</h1>
+        
+        <div id="authError" class="hidden mb-4 p-3 bg-red-900/50 border border-red-500 text-red-200 text-sm rounded"></div>
+
+        <form id="authForm" class="space-y-4">
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Email</label>
+                <input type="email" id="email" required class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Пароль</label>
+                <input type="password" id="password" required class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+            </div>
+            
+            <div class="flex gap-4 pt-4">
+                <button type="button" onclick="handleAuth('login')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">Увійти</button>
+                <button type="button" onclick="handleAuth('register')" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded transition">Реєстрація</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Main Dashboard View -->
+    <div id="dashboardView" class="hidden max-w-4xl mx-auto">
+        <header class="flex justify-between items-center mb-10 border-b border-gray-800 pb-4">
             <h1 class="text-3xl font-bold text-blue-500">TradeBench <span class="text-gray-500 text-lg">Control Center</span></h1>
+            <button onclick="logout()" class="text-sm text-gray-400 hover:text-white transition">Вийти з акаунта</button>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -68,52 +93,126 @@
     </div>
 
     <script>
+        // Check if user is already logged in
+        document.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('jwt_token');
+            if (token) {
+                showDashboard();
+            }
+        });
+
+        async function handleAuth(action) {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('authError');
+            
+            if (!email || !password) {
+                errorDiv.innerText = "Заповніть всі поля";
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/auth/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) throw new Error(data.error || 'Authentication failed');
+
+                if (action === 'register') {
+                    // Automatically login after successful registration
+                    handleAuth('login');
+                } else if (action === 'login') {
+                    localStorage.setItem('jwt_token', data.token);
+                    showDashboard();
+                }
+
+            } catch (error) {
+                errorDiv.innerText = error.message;
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        function showDashboard() {
+            document.getElementById('authView').classList.add('hidden');
+            document.getElementById('dashboardView').classList.remove('hidden');
+        }
+
+        function logout() {
+            localStorage.removeItem('jwt_token');
+            document.getElementById('dashboardView').classList.add('hidden');
+            document.getElementById('authView').classList.remove('hidden');
+            document.getElementById('authForm').reset();
+            document.getElementById('authError').classList.add('hidden');
+            
+            // Reset dashboard state
+            document.getElementById('idleState').classList.remove('hidden');
+            document.getElementById('completedState').classList.add('hidden');
+            document.getElementById('processingState').classList.add('hidden');
+        }
+
+        // Dashboard Logic with Auth Header
         document.getElementById('startBtn').addEventListener('click', async () => {
             const pair = document.getElementById('pair').value;
             const strategy = document.getElementById('strategy').value;
+            const token = localStorage.getItem('jwt_token');
             
-            // UI Toggle
             document.getElementById('idleState').classList.add('hidden');
             document.getElementById('completedState').classList.add('hidden');
             document.getElementById('processingState').classList.remove('hidden');
             document.getElementById('startBtn').disabled = true;
-            document.getElementById('startBtn').classList.add('opacity-50', 'cursor-not-allowed');
 
             try {
-                // 1. Send POST request to start analysis
                 const startResponse = await fetch('/api/analysis/start', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}` 
+                    },
                     body: JSON.stringify({ pair, strategy })
                 });
                 
+                if (startResponse.status === 401) {
+                    logout();
+                    throw new Error("Сесія закінчилася. Увійдіть знову.");
+                }
+
                 const startData = await startResponse.json();
-                
                 if (!startResponse.ok) throw new Error(startData.error || 'Failed to start');
                 
                 const taskId = startData.task_id;
                 document.getElementById('taskIdDisplay').innerText = `ID: ${taskId}`;
-                document.getElementById('statusText').innerText = "Очікування розрахунків (Polling)...";
 
-                // 2. Poll the status every 1 second (Temp solution before WebSockets)
                 const pollInterval = setInterval(async () => {
-                    const statusResponse = await fetch(`/api/analysis/status/${taskId}`);
+                    const statusResponse = await fetch(`/api/analysis/status/${taskId}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    
+                    if (statusResponse.status === 401) {
+                        clearInterval(pollInterval);
+                        logout();
+                        return;
+                    }
+
                     const statusData = await statusResponse.json();
 
                     if (statusData.status === 'COMPLETED') {
                         clearInterval(pollInterval);
                         document.getElementById('processingState').classList.add('hidden');
                         document.getElementById('completedState').classList.remove('hidden');
-                        
                         document.getElementById('startBtn').disabled = false;
-                        document.getElementById('startBtn').classList.remove('opacity-50', 'cursor-not-allowed');
                     }
                 }, 1000);
 
             } catch (error) {
                 alert(`Помилка: ${error.message}`);
                 document.getElementById('startBtn').disabled = false;
-                document.getElementById('startBtn').classList.remove('opacity-50', 'cursor-not-allowed');
+                document.getElementById('idleState').classList.remove('hidden');
+                document.getElementById('processingState').classList.add('hidden');
             }
         });
     </script>
