@@ -109,57 +109,74 @@ try {
         }
     };
 
-    // Маршрут /api/data/sync тепер видалено. Логіка перенесена у /start.
-
     // ROUTE: POST /api/analysis/start
     if ($method === 'POST' && $path === '/api/analysis/start') {
         $userId = $authenticate();
         $input = json_decode(file_get_contents('php://input'), true);
         $pair = $input['pair'] ?? 'BTCUSDT';
         
+        // Безпечний парсинг дат (уникаємо пустих рядків)
+        $startDate = !empty($input['startDate']) ? $input['startDate'] : null;
+        $endDate = !empty($input['endDate']) ? $input['endDate'] : null;
+        $timeframe = $input['timeframe'] ?? '1h';
+        
+        $startTimestamp = $startDate ? strtotime($startDate . ' 00:00:00') : (time() - 86400 * 30);
+        $endTimestamp = $endDate ? strtotime($endDate . ' 23:59:59') : time();
+        
         // ============================================================
-        // 1. АВТОМАТИЧНА СИНХРОНІЗАЦІЯ ДАНИХ З BINANCE
+        // 1. АВТОМАТИЧНА СИНХРОНІЗАЦІЯ ДАНИХ З BINANCE (ВИПРАВЛЕНО ЧЕРЕЗ cURL)
         // ============================================================
         try {
-            $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval=1h&limit=500";
-            $context = stream_context_create(['http' => ['timeout' => 5]]);
-            $response = @file_get_contents($url, false, $context);
+            $startMs = $startTimestamp * 1000;
+            $endMs = $endTimestamp * 1000;
             
-            if ($response !== false) {
+            $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval={$timeframe}&startTime={$startMs}&endTime={$endMs}&limit=1000";
+            
+            // Використовуємо надійний cURL з підробленим User-Agent, щоб обійти захист Binance
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5); // 5 секунд на відповідь
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            
+            if ($response !== false && $httpCode === 200) {
                 $data = json_decode($response, true);
                 
-                $pdo->beginTransaction();
-                
-                $stmtSync = $pdo->prepare("
-                    INSERT INTO currency_data (pair_name, tick_time, open_price, high_price, low_price, close_price, volume)
-                    VALUES (?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
-                    ON CONFLICT (pair_name, tick_time) DO NOTHING
-                ");
+                // Якщо дані справді надійшли
+                if (is_array($data) && count($data) > 0) {
+                    $pdo->beginTransaction();
+                    
+                    $stmtSync = $pdo->prepare("
+                        INSERT INTO currency_data (pair_name, tick_time, open_price, high_price, low_price, close_price, volume)
+                        VALUES (?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
+                        ON CONFLICT (pair_name, tick_time) DO NOTHING
+                    ");
 
-                foreach ($data as $candle) {
-                    $stmtSync->execute([
-                        $pair, 
-                        $candle[0] / 1000, 
-                        $candle[1], 
-                        $candle[2], 
-                        $candle[3], 
-                        $candle[4], 
-                        $candle[5]
-                    ]);
+                    foreach ($data as $candle) {
+                        $stmtSync->execute([
+                            $pair, 
+                            $candle[0] / 1000, 
+                            $candle[1], 
+                            $candle[2], 
+                            $candle[3], 
+                            $candle[4], 
+                            $candle[5]
+                        ]);
+                    }
+
+                    // АЛГОРИТМ ОЧИЩЕННЯ ПОВНІСТЮ ВИДАЛЕНО!
+                    // Історичні дані - це найцінніше для бектестингу, ми їх не видаляємо.
+
+                    $pdo->commit();
                 }
-
-                // АЛГОРИТМ ОЧИСТКИ: Видаляємо дані старіші за 60 днів
-                // Це не дозволить таблиці нескінченно зростати
-                $stmtClean = $pdo->prepare("DELETE FROM currency_data WHERE pair_name = ? AND tick_time < NOW() - INTERVAL '60 days'");
-                $stmtClean->execute([$pair]);
-
-                $pdo->commit();
             }
         } catch (\Throwable $syncError) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            // Якщо Binance лежить, ігноруємо помилку, можливо дані вже є в базі
         }
         // ============================================================
         
@@ -168,12 +185,6 @@ try {
         $slow_sma = $input['slow_sma'] ?? 21;
         
         $strategyPayload = sprintf("%s:%d:%d", $strategy, $fast_sma, $slow_sma);
-        
-        $startDate = $input['startDate'] ?? null;
-        $endDate = $input['endDate'] ?? null;
-        
-        $startTimestamp = $startDate ? strtotime($startDate . ' 00:00:00') : (time() - 86400 * 30);
-        $endTimestamp = $endDate ? strtotime($endDate . ' 23:59:59') : time();
 
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
 
