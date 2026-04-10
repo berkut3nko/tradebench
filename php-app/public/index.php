@@ -1,4 +1,7 @@
 <?php
+// Вимикаємо виведення HTML-помилок, щоб вони не ламали JSON відповіді
+ini_set('display_errors', '0');
+error_reporting(E_ALL);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -20,14 +23,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
 
-$method = $_SERVER['REQUEST_METHOD'];
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../');
-$dotenv->load();
-$jwtSecret = $_ENV['JWT_SECRET'];
-
 try {
+    $method = $_SERVER['REQUEST_METHOD'];
+    $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+    $dotenv = Dotenv::createImmutable(__DIR__ . '/../');
+    $dotenv->load();
+    $jwtSecret = $_ENV['JWT_SECRET'];
+
     $dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s', $_ENV['DB_HOST'], $_ENV['DB_PORT'], $_ENV['DB_DATABASE']);
     $pdo = new PDO($dsn, $_ENV['DB_USERNAME'], $_ENV['DB_PASSWORD'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -111,18 +114,14 @@ try {
         }
     };
 
-    /* =========================================
-       DATA INGESTOR ROUTE
-       ========================================= */
+    // ROUTE: POST /api/data/sync
     if ($method === 'POST' && $path === '/api/data/sync') {
         $userId = $authenticate();
         $input = json_decode(file_get_contents('php://input'), true);
-        // Default to BTCUSDT (Binance format) if EURUSD is passed
         $pair = $input['pair'] ?? 'BTCUSDT';
         if ($pair === 'BTCUSD') $pair = 'BTCUSDT';
         if ($pair === 'EURUSD') $pair = 'EURUSDT';
         
-        // Fetch 500 hours of historical data from Binance Public API
         $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval=1h&limit=500";
         
         $context = stream_context_create(['http' => ['timeout' => 10]]);
@@ -136,7 +135,6 @@ try {
 
         $data = json_decode($response, true);
 
-        // Fast bulk insert into PostgreSQL (OHLCV format)
         $stmt = $pdo->prepare("
             INSERT INTO currency_data (pair_name, tick_time, open_price, high_price, low_price, close_price, volume)
             VALUES (?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
@@ -151,11 +149,11 @@ try {
             $stmt->execute([
                 $pair, 
                 $timeSec, 
-                $candle[1], // Open
-                $candle[2], // High
-                $candle[3], // Low
-                $candle[4], // Close
-                $candle[5]  // Volume
+                $candle[1], 
+                $candle[2], 
+                $candle[3], 
+                $candle[4], 
+                $candle[5]  
             ]);
             if ($stmt->rowCount() > 0) {
                 $insertedCount++;
@@ -175,7 +173,7 @@ try {
     if ($method === 'POST' && $path === '/api/analysis/start') {
         $userId = $authenticate();
         $input = json_decode(file_get_contents('php://input'), true);
-        $pair = $input['pair'] ?? 'BTCUSD';
+        $pair = $input['pair'] ?? 'BTCUSDT';
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
 
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
@@ -193,6 +191,44 @@ try {
         }
 
         echo json_encode(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started"]);
+        exit;
+    }
+
+    // ROUTE: GET /api/analysis/status/{taskId}
+    if ($method === 'GET' && preg_match('#^/api/analysis/status/([a-f0-9\-]+)$#', $path, $matches)) {
+        $userId = $authenticate();
+        $taskId = $matches[1];
+        
+        $stmt = $pdo->prepare("SELECT status FROM analysis_tasks WHERE id = ? AND user_id = ?");
+        $stmt->execute([$taskId, $userId]);
+        $task = $stmt->fetch();
+
+        if (!$task) {
+            http_response_code(404);
+            echo json_encode(["error" => "Task not found or access denied"]);
+            exit;
+        }
+
+        echo json_encode(["task_id" => $taskId, "status" => $task['status']]);
+        exit;
+    }
+
+    // ROUTE: GET /api/analysis/history (PROTECTED)
+    if ($method === 'GET' && $path === '/api/analysis/history') {
+        $userId = $authenticate();
+        
+        $stmt = $pdo->prepare("
+            SELECT t.id as task_id, t.pair, t.status, t.created_at, r.result_data
+            FROM analysis_tasks t
+            LEFT JOIN analysis_results r ON t.id = r.task_id
+            WHERE t.user_id = ?
+            ORDER BY t.created_at DESC
+            LIMIT 10
+        ");
+        $stmt->execute([$userId]);
+        $history = $stmt->fetchAll();
+        
+        echo json_encode($history);
         exit;
     }
 
@@ -229,7 +265,11 @@ try {
 
     echo json_encode(["status" => "online", "message" => "TradeBench API is running"]);
 
-} catch (\Exception $e) {
+} catch (\Throwable $e) {
+    // Відловлюємо БУДЬ-ЯКУ помилку (навіть синтаксичну) і повертаємо як JSON
     http_response_code(500);
-    echo json_encode(["error" => "Internal Server Error", "details" => $e->getMessage()]);
+    echo json_encode([
+        "error" => "Internal Server Error", 
+        "details" => $e->getMessage()
+    ]);
 }

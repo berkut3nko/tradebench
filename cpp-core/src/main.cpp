@@ -34,6 +34,10 @@ struct BacktestResult {
  */
 class DataRepository {
 public:
+    /**
+     * @brief Constructor for DataRepository.
+     * @param conn_str Connection string for PostgreSQL.
+     */
     explicit DataRepository(const std::string& conn_str) : m_conn_str(conn_str) {}
 
     /**
@@ -77,20 +81,29 @@ public:
     }
 
     /**
-     * @brief Updates task status to COMPLETED in the database.
+     * @brief Updates task status to COMPLETED and saves result data.
      * @param task_id Unique identifier of the task.
      * @param profit Calculated profit.
+     * @param trades Number of trades executed.
+     * @param equity_json JSON string of the equity curve.
      */
-    void saveResult(const std::string& task_id, double profit) {
+    void saveResult(const std::string& task_id, double profit, int trades, const std::string& equity_json) {
         try {
             pqxx::connection C(m_conn_str);
             pqxx::work W(C);
             
-            std::string sql = "UPDATE analysis_tasks SET status = 'COMPLETED' WHERE id = " + W.quote(task_id) + ";";
-            W.exec(sql);
+            /* Update status */
+            std::string sql_update = "UPDATE analysis_tasks SET status = 'COMPLETED' WHERE id = " + W.quote(task_id) + ";";
+            W.exec(sql_update);
+
+            /* Insert detailed results into analysis_results table */
+            std::string result_data = "{\"profit\": " + std::to_string(profit) + ", \"trades\": " + std::to_string(trades) + ", \"equity\": " + equity_json + "}";
+            std::string sql_insert = "INSERT INTO analysis_results (task_id, result_data) VALUES (" + W.quote(task_id) + ", " + W.quote(result_data) + "::jsonb);";
+            W.exec(sql_insert);
+
             W.commit();
             
-            std::cout << "[Repo] DB updated: Task " << task_id << " marked as COMPLETED." << std::endl;
+            std::cout << "[Repo] DB updated: Task " << task_id << " results saved." << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "[Repo] Save Error: " << e.what() << std::endl;
         }
@@ -125,13 +138,13 @@ public:
         const int short_window = 9;
         const int long_window = 21;
 
-        if (prices.size() <= long_window) {
+        if (prices.size() <= static_cast<size_t>(long_window)) {
             std::cerr << "[Engine] Not enough data to run simulation." << std::endl;
             result.equity_curve.push_back(initial_capital);
             return result;
         }
 
-        // Fill initial curve before long SMA is available
+        /* Fill initial curve before long SMA is available */
         for (int i = 0; i < long_window; ++i) {
             result.equity_curve.push_back(current_capital);
         }
@@ -142,28 +155,28 @@ public:
             double prev_short_sma = 0.0;
             double prev_long_sma = 0.0;
 
-            // Calculate current SMAs
+            /* Calculate current SMAs */
             for(int j = 0; j < short_window; ++j) short_sma += prices[i - j];
             short_sma /= short_window;
 
             for(int j = 0; j < long_window; ++j) long_sma += prices[i - j];
             long_sma /= long_window;
 
-            // Calculate previous SMAs for cross detection
+            /* Calculate previous SMAs for cross detection */
             for(int j = 1; j <= short_window; ++j) prev_short_sma += prices[i - j];
             prev_short_sma /= short_window;
 
             for(int j = 1; j <= long_window; ++j) prev_long_sma += prices[i - j];
             prev_long_sma /= long_window;
 
-            // Buy Signal: Short SMA crosses ABOVE Long SMA
+            /* Buy Signal: Short SMA crosses ABOVE Long SMA */
             if (!in_position && prev_short_sma <= prev_long_sma && short_sma > long_sma) {
                 crypto_amount = current_capital / prices[i];
                 current_capital = 0.0;
                 in_position = true;
                 result.trades_count++;
             }
-            // Sell Signal: Short SMA crosses BELOW Long SMA
+            /* Sell Signal: Short SMA crosses BELOW Long SMA */
             else if (in_position && prev_short_sma >= prev_long_sma && short_sma < long_sma) {
                 current_capital = crypto_amount * prices[i];
                 crypto_amount = 0.0;
@@ -171,12 +184,12 @@ public:
                 result.trades_count++;
             }
 
-            // Record portfolio value
+            /* Record portfolio value */
             double portfolio_value = in_position ? (crypto_amount * prices[i]) : current_capital;
             result.equity_curve.push_back(portfolio_value);
         }
 
-        // Finalize profit
+        /* Finalize profit */
         double final_value = in_position ? (crypto_amount * prices.back()) : current_capital;
         result.profit = final_value - initial_capital;
         
@@ -211,7 +224,15 @@ public:
                 std::vector<double> prices = thread_repo.fetchPrices(req.currency_pair());
                 BacktestResult res = engine.runSimulation(prices, req.strategy_name());
 
-                thread_repo.saveResult(task_id, res.profit);
+                /* Construct equity JSON array */
+                std::string equity_json = "[";
+                for (size_t i = 0; i < res.equity_curve.size(); ++i) {
+                    equity_json += std::to_string(res.equity_curve[i]);
+                    if (i < res.equity_curve.size() - 1) equity_json += ",";
+                }
+                equity_json += "]";
+
+                thread_repo.saveResult(task_id, res.profit, res.trades_count, equity_json);
                 
                 const char* redis_env = std::getenv("REDIS_HOST");
                 std::string redis_host = redis_env ? redis_env : "redis";
@@ -219,14 +240,6 @@ public:
                 redisContext* rc = redisConnect(redis_host.c_str(), 6379);
                 if (rc != nullptr && !rc->err) {
                     
-                    // Build JSON array for equity curve manually to avoid heavy dependencies
-                    std::string equity_json = "[";
-                    for (size_t i = 0; i < res.equity_curve.size(); ++i) {
-                        equity_json += std::to_string(res.equity_curve[i]);
-                        if (i < res.equity_curve.size() - 1) equity_json += ",";
-                    }
-                    equity_json += "]";
-
                     std::string payload = "{\"task_id\": \"" + task_id + "\", "
                                         + "\"status\": \"COMPLETED\", "
                                         + "\"profit\": " + std::to_string(res.profit) + ", "
@@ -271,6 +284,9 @@ void RunServer() {
     server->Wait();
 }
 
+/**
+ * @brief Main execution entrypoint for the application.
+ */
 int main() {
     std::cout << "Initializing TradeBench Core with Async Processing & Redis..." << std::endl;
     RunServer();

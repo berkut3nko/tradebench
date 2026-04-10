@@ -109,6 +109,28 @@
                 </div>
             </div>
         </div>
+
+        <!-- Історія аналізів (NEW) -->
+        <div class="mt-8 bg-gray-800 p-6 rounded-xl border border-gray-700">
+            <h2 class="text-xl font-semibold mb-4 text-gray-300">Історія бектестів</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-gray-400">
+                    <thead class="text-xs text-gray-500 uppercase bg-gray-900 border-b border-gray-700">
+                        <tr>
+                            <th class="px-4 py-3">Дата</th>
+                            <th class="px-4 py-3">Пара</th>
+                            <th class="px-4 py-3">Статус</th>
+                            <th class="px-4 py-3">Прибуток</th>
+                            <th class="px-4 py-3">Дія</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <!-- Сюди завантажуються минулі результати -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -142,6 +164,7 @@
             document.getElementById('authView').classList.add('hidden');
             document.getElementById('dashboardView').classList.remove('hidden');
             setupEventStream();
+            loadHistory();
         }
 
         function logout() {
@@ -150,9 +173,66 @@
             document.getElementById('authView').classList.remove('hidden');
             if (window.eventSource) window.eventSource.close();
             if (equityChartInstance) equityChartInstance.destroy();
+            document.getElementById('historyTableBody').innerHTML = '';
         }
 
         let currentTaskId = null;
+
+        /* Fetch and display task history */
+        async function loadHistory() {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) return;
+            try {
+                const res = await fetch('/api/analysis/history', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                const tbody = document.getElementById('historyTableBody');
+                tbody.innerHTML = '';
+                
+                data.forEach(task => {
+                    let resultData = task.result_data ? JSON.parse(task.result_data) : null;
+                    let profitText = resultData ? `$${resultData.profit.toFixed(2)}` : '-';
+                    let profitClass = resultData && resultData.profit >= 0 ? 'text-green-500' : (resultData ? 'text-red-500' : '');
+                    let date = new Date(task.created_at).toLocaleString('uk-UA');
+
+                    let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${task.result_data}' class="text-blue-400 hover:text-blue-300">Переглянути</button>` : '-';
+
+                    tbody.innerHTML += `
+                        <tr class="border-b border-gray-800 hover:bg-gray-750">
+                            <td class="px-4 py-3">${date}</td>
+                            <td class="px-4 py-3 font-bold text-white">${task.pair}</td>
+                            <td class="px-4 py-3">${task.status}</td>
+                            <td class="px-4 py-3 font-bold ${profitClass}">${profitText}</td>
+                            <td class="px-4 py-3">${actionBtn}</td>
+                        </tr>
+                    `;
+                });
+            } catch (e) {
+                console.error("Failed to load history", e);
+            }
+        }
+
+        /* Render chart from history */
+        window.viewHistoricalChart = function(btn) {
+            const resultData = JSON.parse(btn.getAttribute('data-result'));
+            
+            document.getElementById('idleState').classList.add('hidden');
+            document.getElementById('processingState').classList.add('hidden');
+            document.getElementById('completedState').classList.remove('hidden');
+
+            const profitEl = document.getElementById('profitDisplay');
+            profitEl.innerText = `${resultData.profit >= 0 ? '+' : ''}$${resultData.profit.toFixed(2)}`;
+            profitEl.className = `font-bold ${resultData.profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
+            document.getElementById('tradesDisplay').innerText = `Кількість угод: ${resultData.trades}`;
+
+            if (resultData.equity && resultData.equity.length > 0) {
+                renderChart(resultData.equity);
+            }
+            
+            /* Scroll top smoothly */
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
 
         function renderChart(equityData) {
             const ctx = document.getElementById('equityChart').getContext('2d');
@@ -216,6 +296,9 @@
                     if (data.equity && data.equity.length > 0) {
                         renderChart(data.equity);
                     }
+                    
+                    /* Refresh history table to show the new result */
+                    loadHistory();
                 }
             };
         }
