@@ -37,6 +37,26 @@ class AdminController {
         Response::json(["message" => "User deleted successfully"]);
     }
 
+    public function updateUser(string $id): void {
+        $authData = AuthMiddleware::authenticate(null, 'admin');
+        
+        if ($id == $authData['id']) {
+            Response::error("Cannot edit your own role", 400);
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true);
+        $newRole = $input['role'] ?? null;
+        
+        if (!in_array($newRole, ['standard', 'pro', 'admin'])) {
+            Response::error("Invalid role provided", 400);
+        }
+        
+        $stmt = $this->db->prepare("UPDATE users SET role = ? WHERE id = ?");
+        $stmt->execute([$newRole, $id]);
+        
+        Response::json(["message" => "User role updated to " . strtoupper($newRole)]);
+    }
+
     public function getStats(): void {
         $usersCount = $this->db->query("SELECT COUNT(*) FROM users")->fetchColumn();
         $tasksCount = $this->db->query("SELECT COUNT(*) FROM analysis_tasks")->fetchColumn();

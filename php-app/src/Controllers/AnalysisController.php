@@ -36,8 +36,8 @@ class AnalysisController {
         
         $daysRequested = ($endTimestamp - $startTimestamp) / 86400;
         
-        /* Role-based limitations */
-        if ($userRole === 'standard') {
+        /* Role-based limitations (Admin automatically gets PRO privileges) */
+        if ($userRole !== 'pro' && $userRole !== 'admin') {
             if ($daysRequested > 30) {
                 Response::error("Standard accounts are limited to 30 days of backtesting. Upgrade to PRO.", 403);
             }

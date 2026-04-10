@@ -53,6 +53,7 @@ try {
 
     // Admin Module
     $router->add('GET', '/api/admin/users', [AdminController::class, 'getUsers']);
+    $router->add('PUT', '/api/admin/users/{id}', [AdminController::class, 'updateUser']);
     $router->add('DELETE', '/api/admin/users/{id}', [AdminController::class, 'deleteUser']);
     $router->add('GET', '/api/admin/stats', [AdminController::class, 'getStats']);
 
@@ -65,6 +66,12 @@ try {
     $router->dispatch($method, $uri);
 
 } catch (\Throwable $e) {
-    /* Global Error Handler */
-    Response::error("Internal Server Error", 500, $e->getMessage());
+    /* Global Error Handler - Fail-safe (does not rely on autoloader) */
+    http_response_code(500);
+    echo json_encode([
+        "error" => "System Error",
+        "details" => $e->getMessage(),
+        "hint" => "Check your PSR-4 namespaces and file names."
+    ]);
+    exit;
 }
