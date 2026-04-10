@@ -36,23 +36,7 @@
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 lg:col-span-1 h-fit">
-                <h2 class="text-xl font-semibold mb-4 text-purple-400">Джерело даних</h2>
-                <p class="text-sm text-gray-400 mb-4">Завантажте історичні дані свічок з Binance для розрахунків у C++.</p>
-                <div class="mb-4">
-                    <label class="block text-sm text-gray-400 mb-1">Ринок</label>
-                    <select id="syncPair" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-purple-500">
-                        <option value="BTCUSDT">BTC/USDT</option>
-                        <option value="EURUSDT">EUR/USDT</option>
-                    </select>
-                </div>
-                <button id="syncBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition flex justify-center items-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    Синхронізувати
-                </button>
-                <div id="syncStatus" class="mt-3 text-sm text-center hidden"></div>
-            </div>
-
+            <!-- Форма налаштувань тепер займає 1 колонку -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 lg:col-span-1 h-fit">
                 <h2 class="text-xl font-semibold mb-4 text-blue-400">Аналітика</h2>
                 <div class="mb-4">
@@ -61,6 +45,7 @@
                         <option value="BTCUSDT">BTC/USDT</option>
                         <option value="EURUSDT">EUR/USDT</option>
                     </select>
+                    <p class="text-[10px] text-gray-500 mt-1">*Дані синхронізуються автоматично перед запуском</p>
                 </div>
                 <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Основа стратегії</label>
@@ -69,14 +54,13 @@
                     </select>
                 </div>
                 
-                <!-- NEW: Параметри стратегії (Динамічні) -->
                 <div class="grid grid-cols-2 gap-4 mb-4 bg-gray-900/50 p-3 rounded border border-gray-700">
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">Fast SMA (Швидка)</label>
+                        <label class="block text-xs text-gray-400 mb-1">Fast SMA</label>
                         <input type="number" id="fastSma" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
                     </div>
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">Slow SMA (Повільна)</label>
+                        <label class="block text-xs text-gray-400 mb-1">Slow SMA</label>
                         <input type="number" id="slowSma" value="21" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
                     </div>
                 </div>
@@ -97,7 +81,8 @@
                 </button>
             </div>
 
-            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col items-center text-center lg:col-span-1 min-h-[350px] relative w-full overflow-hidden">
+            <!-- Графік та результати тепер займають 2 колонки (ширше і красивіше) -->
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col items-center text-center lg:col-span-2 min-h-[350px] relative w-full overflow-hidden">
                 <div id="idleState" class="text-gray-500 mt-16">
                     <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
                     <p>Очікування запуску...</p>
@@ -128,22 +113,22 @@
                         </div>
                     </div>
                     
-                    <div class="grid grid-cols-3 gap-2 w-full mb-4">
-                        <div class="bg-gray-900 p-2 rounded border border-gray-700">
+                    <div class="grid grid-cols-3 gap-4 w-full mb-4">
+                        <div class="bg-gray-900 p-3 rounded border border-gray-700">
                             <p class="text-[10px] text-gray-400 uppercase">Угод</p>
-                            <p id="tradesDisplay" class="text-sm font-bold text-blue-400"></p>
+                            <p id="tradesDisplay" class="text-lg font-bold text-blue-400"></p>
                         </div>
-                        <div class="bg-gray-900 p-2 rounded border border-gray-700">
+                        <div class="bg-gray-900 p-3 rounded border border-gray-700">
                             <p class="text-[10px] text-gray-400 uppercase">Win Rate</p>
-                            <p id="winRateDisplay" class="text-sm font-bold text-green-400"></p>
+                            <p id="winRateDisplay" class="text-lg font-bold text-green-400"></p>
                         </div>
-                        <div class="bg-gray-900 p-2 rounded border border-gray-700">
+                        <div class="bg-gray-900 p-3 rounded border border-gray-700">
                             <p class="text-[10px] text-gray-400 uppercase">Просідання</p>
-                            <p id="drawdownDisplay" class="text-sm font-bold text-red-400"></p>
+                            <p id="drawdownDisplay" class="text-lg font-bold text-red-400"></p>
                         </div>
                     </div>
                     
-                    <div class="flex-grow w-full h-40 relative">
+                    <div class="flex-grow w-full h-48 relative">
                         <canvas id="equityChart"></canvas>
                     </div>
                 </div>
@@ -184,7 +169,6 @@
             document.getElementById('endDate').value = today;
         });
 
-        // NEW: Допоміжна функція для красивого форматування назви стратегії
         function formatStrategyName(rawName) {
             if (!rawName) return 'Невідомо';
             if (rawName.includes(':')) {
@@ -249,12 +233,10 @@
                     let profitClass = resultData && resultData.profit >= 0 ? 'text-green-500' : (resultData ? 'text-red-500' : '');
                     
                     let wrText = resultData && resultData.win_rate !== undefined ? `${resultData.win_rate.toFixed(1)}%` : '-';
-                    
-                    // Використовуємо функцію для красивого відображення (напр. "SMA Crossover (10, 50)")
                     let strategyName = formatStrategyName(resultData ? resultData.strategy : null);
 
                     let date = new Date(task.created_at).toLocaleString('uk-UA');
-                    let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${task.result_data}' class="text-blue-400 hover:text-blue-300">Графік</button>` : '-';
+                    let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${task.result_data}' class="text-blue-400 hover:text-blue-300 font-medium">Графік</button>` : '-';
 
                     tbody.innerHTML += `
                         <tr class="border-b border-gray-800 hover:bg-gray-750">
@@ -351,47 +333,10 @@
             };
         }
 
-        document.getElementById('syncBtn').addEventListener('click', async () => {
-            const pair = document.getElementById('syncPair').value;
-            const token = localStorage.getItem('jwt_token');
-            const btn = document.getElementById('syncBtn');
-            const status = document.getElementById('syncStatus');
-            
-            btn.disabled = true;
-            btn.innerHTML = `<svg class="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Завантаження...`;
-            status.classList.add('hidden');
-
-            try {
-                const response = await fetch('/api/data/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ pair })
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error);
-                
-                if (data.records_inserted > 0) {
-                    status.innerText = `✅ Додано ${data.records_inserted} нових свічок!`;
-                    status.className = "mt-3 text-sm text-center text-green-400 block";
-                } else {
-                    status.innerText = `✅ Дані актуальні (дублікати проігноровано)`;
-                    status.className = "mt-3 text-sm text-center text-blue-400 block";
-                }
-                
-            } catch (error) {
-                status.innerText = `❌ Помилка: ${error.message}`;
-                status.className = "mt-3 text-sm text-center text-red-400 block";
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Синхронізувати`;
-            }
-        });
-
         document.getElementById('startBtn').addEventListener('click', async () => {
             const pair = document.getElementById('pair').value;
             const strategy = document.getElementById('strategy').value;
             
-            // Зчитуємо динамічні параметри з інпутів
             const fast_sma = parseInt(document.getElementById('fastSma').value);
             const slow_sma = parseInt(document.getElementById('slowSma').value);
             
@@ -408,7 +353,6 @@
                 const response = await fetch('/api/analysis/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    // Відправляємо параметри на бекенд
                     body: JSON.stringify({ pair, strategy, fast_sma, slow_sma, startDate, endDate })
                 });
                 if (response.status === 401) { logout(); return; }

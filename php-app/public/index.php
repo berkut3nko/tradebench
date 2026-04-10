@@ -109,52 +109,7 @@ try {
         }
     };
 
-    // ROUTE: POST /api/data/sync
-    if ($method === 'POST' && $path === '/api/data/sync') {
-        $userId = $authenticate();
-        $input = json_decode(file_get_contents('php://input'), true);
-        $pair = $input['pair'] ?? 'BTCUSDT';
-        if ($pair === 'BTCUSD') $pair = 'BTCUSDT';
-        if ($pair === 'EURUSD') $pair = 'EURUSDT';
-        
-        $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval=1h&limit=500";
-        $context = stream_context_create(['http' => ['timeout' => 10]]);
-        $response = @file_get_contents($url, false, $context);
-        
-        if ($response === false) {
-            http_response_code(502);
-            echo json_encode(["error" => "Failed to fetch data from Binance API"]);
-            exit;
-        }
-
-        $data = json_decode($response, true);
-
-        // ON CONFLICT DO NOTHING ensures we don't duplicate existing ticks
-        $stmt = $pdo->prepare("
-            INSERT INTO currency_data (pair_name, tick_time, open_price, high_price, low_price, close_price, volume)
-            VALUES (?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
-            ON CONFLICT (pair_name, tick_time) DO NOTHING
-        ");
-
-        $pdo->beginTransaction();
-        $insertedCount = 0;
-        
-        foreach ($data as $candle) {
-            $timeSec = $candle[0] / 1000;
-            $stmt->execute([$pair, $timeSec, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
-            if ($stmt->rowCount() > 0) {
-                $insertedCount++;
-            }
-        }
-        $pdo->commit();
-
-        echo json_encode([
-            "message" => "Data synchronized", 
-            "pair" => $pair,
-            "records_inserted" => $insertedCount
-        ]);
-        exit;
-    }
+    // Маршрут /api/data/sync тепер видалено. Логіка перенесена у /start.
 
     // ROUTE: POST /api/analysis/start
     if ($method === 'POST' && $path === '/api/analysis/start') {
@@ -162,16 +117,58 @@ try {
         $input = json_decode(file_get_contents('php://input'), true);
         $pair = $input['pair'] ?? 'BTCUSDT';
         
-        // Зчитуємо стратегію та динамічні параметри з фронтенду
+        // ============================================================
+        // 1. АВТОМАТИЧНА СИНХРОНІЗАЦІЯ ДАНИХ З BINANCE
+        // ============================================================
+        try {
+            $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval=1h&limit=500";
+            $context = stream_context_create(['http' => ['timeout' => 5]]);
+            $response = @file_get_contents($url, false, $context);
+            
+            if ($response !== false) {
+                $data = json_decode($response, true);
+                
+                $pdo->beginTransaction();
+                
+                $stmtSync = $pdo->prepare("
+                    INSERT INTO currency_data (pair_name, tick_time, open_price, high_price, low_price, close_price, volume)
+                    VALUES (?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
+                    ON CONFLICT (pair_name, tick_time) DO NOTHING
+                ");
+
+                foreach ($data as $candle) {
+                    $stmtSync->execute([
+                        $pair, 
+                        $candle[0] / 1000, 
+                        $candle[1], 
+                        $candle[2], 
+                        $candle[3], 
+                        $candle[4], 
+                        $candle[5]
+                    ]);
+                }
+
+                // АЛГОРИТМ ОЧИСТКИ: Видаляємо дані старіші за 60 днів
+                // Це не дозволить таблиці нескінченно зростати
+                $stmtClean = $pdo->prepare("DELETE FROM currency_data WHERE pair_name = ? AND tick_time < NOW() - INTERVAL '60 days'");
+                $stmtClean->execute([$pair]);
+
+                $pdo->commit();
+            }
+        } catch (\Throwable $syncError) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            // Якщо Binance лежить, ігноруємо помилку, можливо дані вже є в базі
+        }
+        // ============================================================
+        
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
         $fast_sma = $input['fast_sma'] ?? 9;
         $slow_sma = $input['slow_sma'] ?? 21;
         
-        // Формуємо payload-рядок для C++ (наприклад: "SMA_CROSS:10:50")
-        // Це дозволяє передати параметри без зміни схеми gRPC (analysis.proto)
         $strategyPayload = sprintf("%s:%d:%d", $strategy, $fast_sma, $slow_sma);
         
-        // Parse incoming dates to timestamps
         $startDate = $input['startDate'] ?? null;
         $endDate = $input['endDate'] ?? null;
         
@@ -184,7 +181,6 @@ try {
         $stmt->execute([$taskId, $userId, $pair]);
 
         $client = new AnalysisClient('cpp-engine:50051');
-        // Передаємо наш сформований рядок як назву стратегії
         $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategyPayload, $taskId, [
             'start' => $startTimestamp,
             'end' => $endTimestamp
