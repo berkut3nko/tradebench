@@ -50,9 +50,14 @@ public:
     }
 
     /**
-     * @brief Fetches historical close prices for a specific trading pair within a timeframe.
+     * @brief Fetches historical close prices for a specific trading pair and timeframe.
+     * @param pair The currency pair to query.
+     * @param timeframe The resolution of the data (e.g., '1h', '15m').
+     * @param start_ts Unix timestamp for the start date.
+     * @param end_ts Unix timestamp for the end date.
+     * @return A vector of closing prices.
      */
-    std::vector<double> fetchPrices(const std::string& pair, int64_t start_ts, int64_t end_ts) {
+    std::vector<double> fetchPrices(const std::string& pair, const std::string& timeframe, int64_t start_ts, int64_t end_ts) {
         std::vector<double> prices;
         try {
             pqxx::connection C(m_conn_str);
@@ -60,6 +65,7 @@ public:
             
             std::string query = "SELECT close_price FROM currency_data WHERE pair_name = " 
                               + W.quote(pair) 
+                              + " AND timeframe = " + W.quote(timeframe)
                               + " AND tick_time >= to_timestamp(" + std::to_string(start_ts) + ")"
                               + " AND tick_time <= to_timestamp(" + std::to_string(end_ts) + ")"
                               + " ORDER BY tick_time ASC;";
@@ -68,7 +74,7 @@ public:
             for (auto row : R) {
                 prices.push_back(row[0].as<double>());
             }
-            std::cout << "[Repo] Fetched " << prices.size() << " ticks for " << pair << " in given range." << std::endl;
+            std::cout << "[Repo] Fetched " << prices.size() << " ticks for " << pair << " (" << timeframe << ") in given range." << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "[Repo] Fetch Error: " << e.what() << std::endl;
         }
@@ -226,8 +232,9 @@ public:
     Status StartAnalysis(ServerContext* context, const AnalysisRequest* request, AnalysisResponse* response) override {
         std::string task_id = request->task_id();
         std::string strategy_payload = request->strategy_name();
+        std::string timeframe = request->timeframe();
         
-        std::cout << "[Core] RPC received for Task: " << task_id << " | Strategy string: " << strategy_payload << std::endl;
+        std::cout << "[Core] RPC received for Task: " << task_id << " | Strategy: " << strategy_payload << " | Timeframe: " << timeframe << std::endl;
 
         const char* db_env = std::getenv("DB_CONNECTION");
         std::string conn_str = db_env ? db_env : "postgresql://user:pass@db:5432/analyzer_db";
@@ -241,7 +248,8 @@ public:
                 DataRepository thread_repo(conn_str);
                 BacktestingEngine engine;
 
-                std::vector<double> prices = thread_repo.fetchPrices(req.currency_pair(), req.start_timestamp(), req.end_timestamp());
+                /* Fetch prices based on the provided timestamp range and timeframe */
+                std::vector<double> prices = thread_repo.fetchPrices(req.currency_pair(), req.timeframe(), req.start_timestamp(), req.end_timestamp());
                 BacktestResult res = engine.runSimulation(prices, strategy_payload);
 
                 std::string equity_json = "[";

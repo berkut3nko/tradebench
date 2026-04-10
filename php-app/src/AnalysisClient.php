@@ -28,9 +28,10 @@ class AnalysisClient {
      * @param string $strategy
      * @param string $taskId
      * @param array $dateRange Associative array with 'start' and 'end' timestamps
+     * @param string $timeframe The trading timeframe (e.g., '1h', '15m')
      * @return array
      */
-    public function requestAnalysis(string $userId, string $pair, string $strategy, string $taskId, array $dateRange = []): array {
+    public function requestAnalysis(string $userId, string $pair, string $strategy, string $taskId, array $dateRange = [], string $timeframe = '1h'): array {
         $request = new AnalysisRequest();
         $request->setUserId($userId);
         $request->setCurrencyPair($pair);
@@ -43,6 +44,7 @@ class AnalysisClient {
         $request->setStartTimestamp($start);
         $request->setEndTimestamp($end);
         $request->setTaskId($taskId);
+        $request->setTimeframe($timeframe);
 
         // Added a timeout of 5 seconds (5,000,000 microseconds) to prevent PHP from hanging
         list($response, $status) = $this->client->StartAnalysis($request, [], ['timeout' => 5000000])->wait();

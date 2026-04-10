@@ -27,6 +27,8 @@ message AnalysisRequest {
   string strategy_name = 5;
   /* Added task_id to pass the real DB identifier */
   string task_id = 6;
+  /* Timeframe selection (e.g., 1h, 15m, 1d) */
+  string timeframe = 7;
 }
 
 /**
