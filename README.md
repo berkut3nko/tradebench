@@ -32,3 +32,9 @@ exit
 ```text
 docker, postgres, doxygen, git, nginx, protoc
 ```
+
+
+## Restart backend
+```bash
+docker compose restart php-app
+```

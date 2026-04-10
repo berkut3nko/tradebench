@@ -58,17 +58,29 @@
                 <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Валютна пара</label>
                     <select id="pair" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
-                        <!-- Змінено value на BTCUSDT та EURUSDT, щоб співпадало з БД -->
                         <option value="BTCUSDT">BTC/USDT</option>
                         <option value="EURUSDT">EUR/USDT</option>
                     </select>
                 </div>
-                <div class="mb-6">
+                <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Стратегія</label>
                     <select id="strategy" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
-                        <option value="SMA_CROSS">SMA Crossover (9, 21)</option>
+                        <option value="SMA Crossover (9, 21)">SMA Crossover (9, 21)</option>
                     </select>
                 </div>
+                
+                <!-- NEW: Вибір дат -->
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Від (дата)</label>
+                        <input type="date" id="startDate" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">До (дата)</label>
+                        <input type="date" id="endDate" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
                 <button id="startBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">
                     Запустити бектест
                 </button>
@@ -90,27 +102,44 @@
                 </div>
 
                 <div id="completedState" class="hidden w-full h-full flex flex-col">
-                    <div class="flex justify-between w-full mb-2">
+                    <!-- NEW: Відображення стратегії -->
+                    <div class="bg-blue-900/30 text-blue-400 text-xs py-1 px-3 rounded-full mx-auto mb-3 border border-blue-800" id="activeStrategyDisplay">
+                        Стратегія
+                    </div>
+
+                    <div class="flex justify-between w-full mb-4">
                         <div class="text-left">
                             <p class="text-xs text-gray-400">Стартовий баланс</p>
                             <p class="font-bold text-white">$1000.00</p>
                         </div>
                         <div class="text-right">
-                            <p class="text-xs text-gray-400">Зміна капіталу</p>
-                            <p id="profitDisplay" class="font-bold"></p>
+                            <p class="text-xs text-gray-400">Зміна капіталу (PnL)</p>
+                            <p id="profitDisplay" class="font-bold text-lg"></p>
                         </div>
                     </div>
-                    <p id="tradesDisplay" class="text-xs text-gray-400 w-full text-left mb-2"></p>
                     
-                    <!-- Graph Container -->
-                    <div class="flex-grow w-full h-48 relative">
+                    <div class="grid grid-cols-3 gap-2 w-full mb-4">
+                        <div class="bg-gray-900 p-2 rounded border border-gray-700">
+                            <p class="text-[10px] text-gray-400 uppercase">Угод</p>
+                            <p id="tradesDisplay" class="text-sm font-bold text-blue-400"></p>
+                        </div>
+                        <div class="bg-gray-900 p-2 rounded border border-gray-700">
+                            <p class="text-[10px] text-gray-400 uppercase">Win Rate</p>
+                            <p id="winRateDisplay" class="text-sm font-bold text-green-400"></p>
+                        </div>
+                        <div class="bg-gray-900 p-2 rounded border border-gray-700">
+                            <p class="text-[10px] text-gray-400 uppercase">Просідання</p>
+                            <p id="drawdownDisplay" class="text-sm font-bold text-red-400"></p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex-grow w-full h-40 relative">
                         <canvas id="equityChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Історія аналізів (NEW) -->
         <div class="mt-8 bg-gray-800 p-6 rounded-xl border border-gray-700">
             <h2 class="text-xl font-semibold mb-4 text-gray-300">Історія бектестів</h2>
             <div class="overflow-x-auto">
@@ -119,13 +148,13 @@
                         <tr>
                             <th class="px-4 py-3">Дата</th>
                             <th class="px-4 py-3">Пара</th>
-                            <th class="px-4 py-3">Статус</th>
+                            <th class="px-4 py-3">Стратегія</th> <!-- NEW -->
                             <th class="px-4 py-3">Прибуток</th>
+                            <th class="px-4 py-3">Win Rate</th>
                             <th class="px-4 py-3">Дія</th>
                         </tr>
                     </thead>
                     <tbody id="historyTableBody">
-                        <!-- Сюди завантажуються минулі результати -->
                     </tbody>
                 </table>
             </div>
@@ -138,6 +167,12 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             if (localStorage.getItem('jwt_token')) showDashboard();
+            
+            // Заповнюємо дати за замовчуванням (останні 30 днів)
+            const today = new Date().toISOString().split('T')[0];
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            document.getElementById('startDate').value = thirtyDaysAgo;
+            document.getElementById('endDate').value = today;
         });
 
         async function handleAuth(action) {
@@ -178,7 +213,6 @@
 
         let currentTaskId = null;
 
-        /* Fetch and display task history */
         async function loadHistory() {
             const token = localStorage.getItem('jwt_token');
             if (!token) return;
@@ -194,16 +228,20 @@
                     let resultData = task.result_data ? JSON.parse(task.result_data) : null;
                     let profitText = resultData ? `$${resultData.profit.toFixed(2)}` : '-';
                     let profitClass = resultData && resultData.profit >= 0 ? 'text-green-500' : (resultData ? 'text-red-500' : '');
-                    let date = new Date(task.created_at).toLocaleString('uk-UA');
+                    
+                    let wrText = resultData && resultData.win_rate !== undefined ? `${resultData.win_rate.toFixed(1)}%` : '-';
+                    let strategyName = resultData && resultData.strategy ? resultData.strategy : 'Невідомо';
 
-                    let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${task.result_data}' class="text-blue-400 hover:text-blue-300">Переглянути</button>` : '-';
+                    let date = new Date(task.created_at).toLocaleString('uk-UA');
+                    let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${task.result_data}' class="text-blue-400 hover:text-blue-300">Графік</button>` : '-';
 
                     tbody.innerHTML += `
                         <tr class="border-b border-gray-800 hover:bg-gray-750">
                             <td class="px-4 py-3">${date}</td>
                             <td class="px-4 py-3 font-bold text-white">${task.pair}</td>
-                            <td class="px-4 py-3">${task.status}</td>
+                            <td class="px-4 py-3">${strategyName}</td>
                             <td class="px-4 py-3 font-bold ${profitClass}">${profitText}</td>
+                            <td class="px-4 py-3 text-green-400">${wrText}</td>
                             <td class="px-4 py-3">${actionBtn}</td>
                         </tr>
                     `;
@@ -213,37 +251,19 @@
             }
         }
 
-        /* Render chart from history */
         window.viewHistoricalChart = function(btn) {
             const resultData = JSON.parse(btn.getAttribute('data-result'));
-            
-            document.getElementById('idleState').classList.add('hidden');
-            document.getElementById('processingState').classList.add('hidden');
-            document.getElementById('completedState').classList.remove('hidden');
-
-            const profitEl = document.getElementById('profitDisplay');
-            profitEl.innerText = `${resultData.profit >= 0 ? '+' : ''}$${resultData.profit.toFixed(2)}`;
-            profitEl.className = `font-bold ${resultData.profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
-            document.getElementById('tradesDisplay').innerText = `Кількість угод: ${resultData.trades}`;
-
-            if (resultData.equity && resultData.equity.length > 0) {
-                renderChart(resultData.equity);
-            }
-            
-            /* Scroll top smoothly */
+            displayResults(resultData);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         };
 
         function renderChart(equityData) {
             const ctx = document.getElementById('equityChart').getContext('2d');
-            
-            if (equityChartInstance) {
-                equityChartInstance.destroy();
-            }
+            if (equityChartInstance) equityChartInstance.destroy();
 
             const labels = equityData.map((_, i) => i);
             const isProfit = equityData[equityData.length - 1] >= 1000;
-            const color = isProfit ? '#22c55e' : '#ef4444'; // Green or Red
+            const color = isProfit ? '#22c55e' : '#ef4444'; 
             const bgColor = isProfit ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
 
             equityChartInstance = new Chart(ctx, {
@@ -276,6 +296,27 @@
             });
         }
 
+        function displayResults(data) {
+            document.getElementById('idleState').classList.add('hidden');
+            document.getElementById('processingState').classList.add('hidden');
+            document.getElementById('completedState').classList.remove('hidden');
+            document.getElementById('startBtn').disabled = false;
+            
+            document.getElementById('activeStrategyDisplay').innerText = data.strategy || 'Стратегія';
+            
+            const profitEl = document.getElementById('profitDisplay');
+            profitEl.innerText = `${data.profit >= 0 ? '+' : ''}$${data.profit.toFixed(2)}`;
+            profitEl.className = `font-bold text-lg ${data.profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
+            
+            document.getElementById('tradesDisplay').innerText = data.trades || 0;
+            document.getElementById('winRateDisplay').innerText = data.win_rate !== undefined ? `${data.win_rate.toFixed(1)}%` : '0.0%';
+            document.getElementById('drawdownDisplay').innerText = data.drawdown !== undefined ? `-${data.drawdown.toFixed(1)}%` : '0.0%';
+            
+            if (data.equity && data.equity.length > 0) {
+                renderChart(data.equity);
+            }
+        }
+
         function setupEventStream() {
             const token = localStorage.getItem('jwt_token');
             if (!token) return;
@@ -283,21 +324,7 @@
             window.eventSource.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 if (data.task_id === currentTaskId && data.status === 'COMPLETED') {
-                    document.getElementById('processingState').classList.add('hidden');
-                    document.getElementById('completedState').classList.remove('hidden');
-                    document.getElementById('startBtn').disabled = false;
-                    
-                    const profitEl = document.getElementById('profitDisplay');
-                    profitEl.innerText = `${data.profit >= 0 ? '+' : ''}$${data.profit.toFixed(2)}`;
-                    profitEl.className = `font-bold ${data.profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
-                    
-                    document.getElementById('tradesDisplay').innerText = `Кількість угод: ${data.trades}`;
-                    
-                    if (data.equity && data.equity.length > 0) {
-                        renderChart(data.equity);
-                    }
-                    
-                    /* Refresh history table to show the new result */
+                    displayResults(data);
                     loadHistory();
                 }
             };
@@ -321,8 +348,16 @@
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error);
-                status.innerText = `✅ Додано ${data.records_inserted} свічок!`;
-                status.className = "mt-3 text-sm text-center text-green-400 block";
+                
+                // Інформуємо користувача, що дублікати були пропущені
+                if (data.records_inserted > 0) {
+                    status.innerText = `✅ Додано ${data.records_inserted} нових свічок!`;
+                    status.className = "mt-3 text-sm text-center text-green-400 block";
+                } else {
+                    status.innerText = `✅ Дані актуальні (дублікати проігноровано)`;
+                    status.className = "mt-3 text-sm text-center text-blue-400 block";
+                }
+                
             } catch (error) {
                 status.innerText = `❌ Помилка: ${error.message}`;
                 status.className = "mt-3 text-sm text-center text-red-400 block";
@@ -335,6 +370,8 @@
         document.getElementById('startBtn').addEventListener('click', async () => {
             const pair = document.getElementById('pair').value;
             const strategy = document.getElementById('strategy').value;
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
             const token = localStorage.getItem('jwt_token');
             
             document.getElementById('idleState').classList.add('hidden');
@@ -346,7 +383,8 @@
                 const response = await fetch('/api/analysis/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ pair, strategy })
+                    // NEW: Передаємо вибрані дати на бекенд
+                    body: JSON.stringify({ pair, strategy, startDate, endDate })
                 });
                 if (response.status === 401) { logout(); return; }
                 const data = await response.json();

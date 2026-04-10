@@ -1,5 +1,4 @@
 <?php
-// Вимикаємо виведення HTML-помилок, щоб вони не ламали JSON відповіді
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
@@ -37,7 +36,6 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
 
-    // ROUTE: POST /api/auth/register
     if ($method === 'POST' && $path === '/api/auth/register') {
         $input = json_decode(file_get_contents('php://input'), true);
         $email = $input['email'] ?? '';
@@ -50,7 +48,6 @@ try {
         }
 
         $hash = password_hash($password, PASSWORD_DEFAULT);
-
         try {
             $stmt = $pdo->prepare("INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id");
             $stmt->execute([$email, $hash]);
@@ -62,7 +59,6 @@ try {
         exit;
     }
 
-    // ROUTE: POST /api/auth/login
     if ($method === 'POST' && $path === '/api/auth/login') {
         $input = json_decode(file_get_contents('php://input'), true);
         $email = $input['email'] ?? '';
@@ -87,7 +83,6 @@ try {
         exit;
     }
 
-    // Helper: Verify JWT
     $authenticate = function($tokenFromQuery = null) use ($jwtSecret) {
         $headers = getallheaders();
         $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
@@ -123,7 +118,6 @@ try {
         if ($pair === 'EURUSD') $pair = 'EURUSDT';
         
         $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval=1h&limit=500";
-        
         $context = stream_context_create(['http' => ['timeout' => 10]]);
         $response = @file_get_contents($url, false, $context);
         
@@ -135,6 +129,7 @@ try {
 
         $data = json_decode($response, true);
 
+        // ON CONFLICT DO NOTHING ensures we don't duplicate existing ticks
         $stmt = $pdo->prepare("
             INSERT INTO currency_data (pair_name, tick_time, open_price, high_price, low_price, close_price, volume)
             VALUES (?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
@@ -146,15 +141,7 @@ try {
         
         foreach ($data as $candle) {
             $timeSec = $candle[0] / 1000;
-            $stmt->execute([
-                $pair, 
-                $timeSec, 
-                $candle[1], 
-                $candle[2], 
-                $candle[3], 
-                $candle[4], 
-                $candle[5]  
-            ]);
+            $stmt->execute([$pair, $timeSec, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
             if ($stmt->rowCount() > 0) {
                 $insertedCount++;
             }
@@ -162,7 +149,7 @@ try {
         $pdo->commit();
 
         echo json_encode([
-            "message" => "Data synchronized successfully", 
+            "message" => "Data synchronized", 
             "pair" => $pair,
             "records_inserted" => $insertedCount
         ]);
@@ -175,6 +162,13 @@ try {
         $input = json_decode(file_get_contents('php://input'), true);
         $pair = $input['pair'] ?? 'BTCUSDT';
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
+        
+        // Parse incoming dates to timestamps
+        $startDate = $input['startDate'] ?? null;
+        $endDate = $input['endDate'] ?? null;
+        
+        $startTimestamp = $startDate ? strtotime($startDate . ' 00:00:00') : (time() - 86400 * 30);
+        $endTimestamp = $endDate ? strtotime($endDate . ' 23:59:59') : time();
 
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
 
@@ -182,7 +176,11 @@ try {
         $stmt->execute([$taskId, $userId, $pair]);
 
         $client = new AnalysisClient('cpp-engine:50051');
-        $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategy, $taskId);
+        // Pass the date range to the gRPC client
+        $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategy, $taskId, [
+            'start' => $startTimestamp,
+            'end' => $endTimestamp
+        ]);
 
         if (!$grpcResult['success']) {
             http_response_code(500);
@@ -191,25 +189,6 @@ try {
         }
 
         echo json_encode(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started"]);
-        exit;
-    }
-
-    // ROUTE: GET /api/analysis/status/{taskId}
-    if ($method === 'GET' && preg_match('#^/api/analysis/status/([a-f0-9\-]+)$#', $path, $matches)) {
-        $userId = $authenticate();
-        $taskId = $matches[1];
-        
-        $stmt = $pdo->prepare("SELECT status FROM analysis_tasks WHERE id = ? AND user_id = ?");
-        $stmt->execute([$taskId, $userId]);
-        $task = $stmt->fetch();
-
-        if (!$task) {
-            http_response_code(404);
-            echo json_encode(["error" => "Task not found or access denied"]);
-            exit;
-        }
-
-        echo json_encode(["task_id" => $taskId, "status" => $task['status']]);
         exit;
     }
 
@@ -237,6 +216,8 @@ try {
         $userId = $authenticate($_GET['token'] ?? null);
 
         if (function_exists('set_time_limit')) set_time_limit(0);
+        ignore_user_abort(false); // ВАЖЛИВО: Дозволяє PHP реагувати на відключення
+        
         @ini_set('zlib.output_compression', '0');
         @ini_set('implicit_flush', '1');
         while (ob_get_level() > 0) ob_end_clean();
@@ -250,14 +231,46 @@ try {
         echo "event: ping\ndata: connected\n\n";
         flush();
 
-        $redis = new RedisClient(['scheme' => 'tcp', 'host' => 'redis', 'port' => 6379, 'read_write_timeout' => 0]);
-        $pubsub = $redis->pubSubLoop();
-        $pubsub->subscribe('analysis_events');
-        
-        foreach ($pubsub as $message) {
-            if ($message->kind === 'message') {
-                echo "data: " . $message->payload . "\n\n";
+        // Додано таймаут у 3 секунди на читання сокету Redis
+        $redis = new RedisClient([
+            'scheme' => 'tcp', 
+            'host' => 'redis', 
+            'port' => 6379, 
+            'read_write_timeout' => 3
+        ]);
+
+        while (true) {
+            try {
+                $pubsub = $redis->pubSubLoop();
+                $pubsub->subscribe('analysis_events');
+                
+                foreach ($pubsub as $message) {
+                    if ($message->kind === 'message') {
+                        echo "data: " . $message->payload . "\n\n";
+                        @ob_flush();
+                        flush();
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Таймаут від Redis (минуло 3 секунди без повідомлень від C++)
+                // Відправляємо пустий "пінг" у браузер
+                echo ": keepalive\n\n";
+                @ob_flush();
                 flush();
+                
+                // ПЕРЕВІРКА: Якщо браузер закрив вкладку або оновив сторінку,
+                // connection_aborted() стане true, і ми виходимо з циклу!
+                if (connection_aborted()) {
+                    break; // Це звільнить PHP-воркер
+                }
+                
+                // Якщо браузер досі відкритий, перепідключаємося до Redis і чекаємо далі
+                try {
+                    $redis->disconnect();
+                    $redis->connect();
+                } catch (\Throwable $e2) {
+                    sleep(1);
+                }
             }
         }
         exit;
@@ -266,10 +279,6 @@ try {
     echo json_encode(["status" => "online", "message" => "TradeBench API is running"]);
 
 } catch (\Throwable $e) {
-    // Відловлюємо БУДЬ-ЯКУ помилку (навіть синтаксичну) і повертаємо як JSON
     http_response_code(500);
-    echo json_encode([
-        "error" => "Internal Server Error", 
-        "details" => $e->getMessage()
-    ]);
+    echo json_encode(["error" => "Internal Server Error", "details" => $e->getMessage()]);
 }
