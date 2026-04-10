@@ -161,7 +161,15 @@ try {
         $userId = $authenticate();
         $input = json_decode(file_get_contents('php://input'), true);
         $pair = $input['pair'] ?? 'BTCUSDT';
+        
+        // Зчитуємо стратегію та динамічні параметри з фронтенду
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
+        $fast_sma = $input['fast_sma'] ?? 9;
+        $slow_sma = $input['slow_sma'] ?? 21;
+        
+        // Формуємо payload-рядок для C++ (наприклад: "SMA_CROSS:10:50")
+        // Це дозволяє передати параметри без зміни схеми gRPC (analysis.proto)
+        $strategyPayload = sprintf("%s:%d:%d", $strategy, $fast_sma, $slow_sma);
         
         // Parse incoming dates to timestamps
         $startDate = $input['startDate'] ?? null;
@@ -176,8 +184,8 @@ try {
         $stmt->execute([$taskId, $userId, $pair]);
 
         $client = new AnalysisClient('cpp-engine:50051');
-        // Pass the date range to the gRPC client
-        $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategy, $taskId, [
+        // Передаємо наш сформований рядок як назву стратегії
+        $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategyPayload, $taskId, [
             'start' => $startTimestamp,
             'end' => $endTimestamp
         ]);
@@ -216,7 +224,7 @@ try {
         $userId = $authenticate($_GET['token'] ?? null);
 
         if (function_exists('set_time_limit')) set_time_limit(0);
-        ignore_user_abort(false); // ВАЖЛИВО: Дозволяє PHP реагувати на відключення
+        ignore_user_abort(false); 
         
         @ini_set('zlib.output_compression', '0');
         @ini_set('implicit_flush', '1');
@@ -231,7 +239,6 @@ try {
         echo "event: ping\ndata: connected\n\n";
         flush();
 
-        // Додано таймаут у 3 секунди на читання сокету Redis
         $redis = new RedisClient([
             'scheme' => 'tcp', 
             'host' => 'redis', 
@@ -252,19 +259,14 @@ try {
                     }
                 }
             } catch (\Throwable $e) {
-                // Таймаут від Redis (минуло 3 секунди без повідомлень від C++)
-                // Відправляємо пустий "пінг" у браузер
                 echo ": keepalive\n\n";
                 @ob_flush();
                 flush();
                 
-                // ПЕРЕВІРКА: Якщо браузер закрив вкладку або оновив сторінку,
-                // connection_aborted() стане true, і ми виходимо з циклу!
                 if (connection_aborted()) {
-                    break; // Це звільнить PHP-воркер
+                    break;
                 }
                 
-                // Якщо браузер досі відкритий, перепідключаємося до Redis і чекаємо далі
                 try {
                     $redis->disconnect();
                     $redis->connect();
