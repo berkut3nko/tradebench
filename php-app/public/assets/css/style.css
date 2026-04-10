@@ -1,0 +1,23 @@
+/* Custom Scrollbar for a sleek dark theme look */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1f2937; /* Tailwind gray-800 */
+}
+
+::-webkit-scrollbar-thumb {
+    background: #4b5563; /* Tailwind gray-600 */
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #6b7280; /* Tailwind gray-500 */
+}
+
+/* Make body transition smooth */
+body {
+    transition: background-color 0.3s ease;
+}
