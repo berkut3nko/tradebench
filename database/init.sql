@@ -18,10 +18,22 @@ CREATE TABLE analysis_tasks (
 CREATE TABLE analysis_results (
     id SERIAL PRIMARY KEY,
     task_id UUID REFERENCES analysis_tasks(id),
-    -- Complex JSON storage for technical indicators and signals
     result_data JSONB NOT NULL,
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexing for faster task lookup by user
 CREATE INDEX idx_tasks_user ON analysis_tasks(user_id);
+
+CREATE TABLE currency_data (
+    id SERIAL PRIMARY KEY,
+    pair_name VARCHAR(20) NOT NULL,
+    tick_time TIMESTAMP NOT NULL,
+    open_price NUMERIC(18, 8),
+    high_price NUMERIC(18, 8),
+    low_price NUMERIC(18, 8),
+    close_price NUMERIC(18, 8),
+    volume NUMERIC(24, 8),
+    UNIQUE(pair_name, tick_time)
+);
+
+CREATE INDEX idx_currency_data_pair_time ON currency_data(pair_name, tick_time DESC);
