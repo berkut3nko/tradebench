@@ -38,12 +38,34 @@ try {
 
     if ($method === 'POST' && $path === '/api/auth/register') {
         $input = json_decode(file_get_contents('php://input'), true);
-        $email = $input['email'] ?? '';
+        
+        /* Sanitize inputs */
+        $email = trim($input['email'] ?? '');
         $password = $input['password'] ?? '';
 
+        /* Basic emptiness check */
         if (empty($email) || empty($password)) {
             http_response_code(400);
             echo json_encode(["error" => "Email and password are required"]);
+            exit;
+        }
+
+        /* Strict Email Validation */
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            http_response_code(400);
+            echo json_encode(["error" => "Invalid email format"]);
+            exit;
+        }
+
+        /* Password Strength Validation */
+        if (strlen($password) < 8) {
+            http_response_code(400);
+            echo json_encode(["error" => "Password must be at least 8 characters long"]);
+            exit;
+        }
+        if (!preg_match('/[A-Za-z]/', $password) || !preg_match('/[0-9]/', $password)) {
+            http_response_code(400);
+            echo json_encode(["error" => "Password must contain at least one letter and one number"]);
             exit;
         }
 
@@ -61,10 +83,16 @@ try {
 
     if ($method === 'POST' && $path === '/api/auth/login') {
         $input = json_decode(file_get_contents('php://input'), true);
-        $email = $input['email'] ?? '';
+        $email = trim($input['email'] ?? '');
         $password = $input['password'] ?? '';
 
-        $stmt = $pdo->prepare("SELECT id, password_hash FROM users WHERE email = ?");
+        if (empty($email) || empty($password)) {
+            http_response_code(400);
+            echo json_encode(["error" => "Email and password are required"]);
+            exit;
+        }
+
+        $stmt = $pdo->prepare("SELECT id, password_hash, role FROM users WHERE email = ?");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
@@ -72,10 +100,15 @@ try {
             $payload = [
                 'iss' => 'tradebench_api',
                 'sub' => $user['id'],
+                'role' => $user['role'] ?? 'standard',
                 'iat' => time(),
                 'exp' => time() + (86400 * 7)
             ];
-            echo json_encode(["token" => JWT::encode($payload, $jwtSecret, 'HS256'), "user_id" => $user['id']]);
+            echo json_encode([
+                "token" => JWT::encode($payload, $jwtSecret, 'HS256'), 
+                "user_id" => $user['id'],
+                "role" => $user['role'] ?? 'standard'
+            ]);
         } else {
             http_response_code(401);
             echo json_encode(["error" => "Invalid email or password"]);
@@ -101,7 +134,11 @@ try {
         }
 
         try {
-            return JWT::decode($token, new Key($jwtSecret, 'HS256'))->sub;
+            $decoded = JWT::decode($token, new Key($jwtSecret, 'HS256'));
+            return [
+                'id' => $decoded->sub,
+                'role' => $decoded->role ?? 'standard'
+            ];
         } catch (\Exception $e) {
             http_response_code(401);
             echo json_encode(["error" => "Invalid or expired token"]);
@@ -111,11 +148,13 @@ try {
 
     // ROUTE: POST /api/analysis/start
     if ($method === 'POST' && $path === '/api/analysis/start') {
-        $userId = $authenticate();
+        $authData = $authenticate();
+        $userId = $authData['id'];
+        $userRole = $authData['role'];
+
         $input = json_decode(file_get_contents('php://input'), true);
         $pair = $input['pair'] ?? 'BTCUSDT';
         
-        // Безпечний парсинг дат (уникаємо пустих рядків)
         $startDate = !empty($input['startDate']) ? $input['startDate'] : null;
         $endDate = !empty($input['endDate']) ? $input['endDate'] : null;
         $timeframe = $input['timeframe'] ?? '1h';
@@ -123,21 +162,32 @@ try {
         $startTimestamp = $startDate ? strtotime($startDate . ' 00:00:00') : (time() - 86400 * 30);
         $endTimestamp = $endDate ? strtotime($endDate . ' 23:59:59') : time();
         
-        // ============================================================
-        // 1. АВТОМАТИЧНА СИНХРОНІЗАЦІЯ ДАНИХ З BINANCE (ВИПРАВЛЕНО ЧЕРЕЗ cURL)
-        // ============================================================
+        $daysRequested = ($endTimestamp - $startTimestamp) / 86400;
+        
+        if ($userRole !== 'pro') {
+            if ($daysRequested > 30) {
+                http_response_code(403);
+                echo json_encode(["error" => "Standard accounts are limited to 30 days of backtesting. Upgrade to PRO to test larger datasets."]);
+                exit;
+            }
+            if ($timeframe !== '1h') {
+                http_response_code(403);
+                echo json_encode(["error" => "Custom timeframes (like $timeframe) are available only for PRO accounts."]);
+                exit;
+            }
+        }
+        
         try {
             $startMs = $startTimestamp * 1000;
             $endMs = $endTimestamp * 1000;
             
             $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval={$timeframe}&startTime={$startMs}&endTime={$endMs}&limit=1000";
             
-            // Використовуємо надійний cURL з підробленим User-Agent, щоб обійти захист Binance
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-            curl_setopt($ch, CURLOPT_TIMEOUT, 5); // 5 секунд на відповідь
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5); 
             $response = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -145,7 +195,6 @@ try {
             if ($response !== false && $httpCode === 200) {
                 $data = json_decode($response, true);
                 
-                // Якщо дані справді надійшли
                 if (is_array($data) && count($data) > 0) {
                     $pdo->beginTransaction();
                     
@@ -166,10 +215,6 @@ try {
                             $candle[5]
                         ]);
                     }
-
-                    // АЛГОРИТМ ОЧИЩЕННЯ ПОВНІСТЮ ВИДАЛЕНО!
-                    // Історичні дані - це найцінніше для бектестингу, ми їх не видаляємо.
-
                     $pdo->commit();
                 }
             }
@@ -178,11 +223,11 @@ try {
                 $pdo->rollBack();
             }
         }
-        // ============================================================
         
+        /* Validate strategy parameters */
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
-        $fast_sma = $input['fast_sma'] ?? 9;
-        $slow_sma = $input['slow_sma'] ?? 21;
+        $fast_sma = intval($input['fast_sma'] ?? 9);
+        $slow_sma = intval($input['slow_sma'] ?? 21);
         
         $strategyPayload = sprintf("%s:%d:%d", $strategy, $fast_sma, $slow_sma);
 
@@ -209,7 +254,8 @@ try {
 
     // ROUTE: GET /api/analysis/history (PROTECTED)
     if ($method === 'GET' && $path === '/api/analysis/history') {
-        $userId = $authenticate();
+        $authData = $authenticate();
+        $userId = $authData['id'];
         
         $stmt = $pdo->prepare("
             SELECT t.id as task_id, t.pair, t.status, t.created_at, r.result_data
@@ -228,7 +274,8 @@ try {
 
     // ROUTE: GET /api/analysis/stream
     if ($method === 'GET' && $path === '/api/analysis/stream') {
-        $userId = $authenticate($_GET['token'] ?? null);
+        $authData = $authenticate($_GET['token'] ?? null);
+        $userId = $authData['id'];
 
         if (function_exists('set_time_limit')) set_time_limit(0);
         ignore_user_abort(false); 

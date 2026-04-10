@@ -9,17 +9,22 @@
 </head>
 <body class="bg-gray-900 text-white font-sans min-h-screen p-8">
 
-    <div id="authView" class="max-w-md mx-auto mt-20 bg-gray-800 p-8 rounded-xl border border-gray-700">
-        <h1 class="text-3xl font-bold text-blue-500 mb-6 text-center">TradeBench</h1>
+    <div id="authView" class="max-w-md mx-auto mt-20 bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-2xl">
+        <h1 class="text-3xl font-bold text-blue-500 mb-2 text-center">TradeBench</h1>
+        <p class="text-gray-400 text-sm text-center mb-6">Аналітична платформа</p>
+        
         <div id="authError" class="hidden mb-4 p-3 bg-red-900/50 border border-red-500 text-red-200 text-sm rounded"></div>
+        <div id="authSuccess" class="hidden mb-4 p-3 bg-green-900/50 border border-green-500 text-green-200 text-sm rounded"></div>
+
         <form id="authForm" class="space-y-4">
             <div>
                 <label class="block text-sm text-gray-400 mb-1">Email</label>
-                <input type="email" id="email" required class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+                <input type="email" id="email" required class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500 transition">
             </div>
             <div>
                 <label class="block text-sm text-gray-400 mb-1">Пароль</label>
-                <input type="password" id="password" required class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+                <input type="password" id="password" required class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500 transition">
+                <p class="text-xs text-gray-500 mt-1">Для реєстрації: мін. 8 символів, літери та цифри.</p>
             </div>
             <div class="flex gap-4 pt-4">
                 <button type="button" onclick="handleAuth('login')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">Увійти</button>
@@ -30,23 +35,36 @@
 
     <div id="dashboardView" class="hidden max-w-6xl mx-auto">
         <header class="flex justify-between items-center mb-10 border-b border-gray-800 pb-4">
-            <h1 class="text-3xl font-bold text-blue-500">TradeBench <span class="text-gray-500 text-lg">Control Center</span></h1>
+            <div class="flex items-center gap-4">
+                <h1 class="text-3xl font-bold text-blue-500">TradeBench <span class="text-gray-500 text-lg">Control Center</span></h1>
+                <span id="roleBadge" class="hidden px-3 py-1 rounded text-xs font-bold uppercase tracking-wider"></span>
+            </div>
             <button onclick="logout()" class="text-sm text-gray-400 hover:text-white transition">Вийти з акаунта</button>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <!-- Форма налаштувань тепер займає 1 колонку -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 lg:col-span-1 h-fit">
                 <h2 class="text-xl font-semibold mb-4 text-blue-400">Аналітика</h2>
+                
                 <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Валютна пара</label>
                     <select id="pair" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
                         <option value="BTCUSDT">BTC/USDT</option>
                         <option value="EURUSDT">EUR/USDT</option>
                     </select>
-                    <p class="text-[10px] text-gray-500 mt-1">*Дані синхронізуються автоматично перед запуском</p>
                 </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Таймфрейм</label>
+                    <select id="timeframe" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+                        <option value="1h">1 Година (1h)</option>
+                        <option value="15m">15 Хвилин (15m) — [PRO]</option>
+                        <option value="4h">4 Години (4h) — [PRO]</option>
+                        <option value="1d">1 День (1d) — [PRO]</option>
+                    </select>
+                </div>
+
                 <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Основа стратегії</label>
                     <select id="strategy" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
@@ -65,7 +83,7 @@
                     </div>
                 </div>
                 
-                <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="grid grid-cols-2 gap-4 mb-6 relative">
                     <div>
                         <label class="block text-sm text-gray-400 mb-1">Від (дата)</label>
                         <input type="date" id="startDate" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-sm text-white outline-none focus:border-blue-500">
@@ -74,6 +92,7 @@
                         <label class="block text-sm text-gray-400 mb-1">До (дата)</label>
                         <input type="date" id="endDate" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-sm text-white outline-none focus:border-blue-500">
                     </div>
+                    <p class="text-[10px] text-gray-500 col-span-2 mt-1">*Standard акаунт підтримує до 30 днів історії</p>
                 </div>
 
                 <button id="startBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">
@@ -81,7 +100,6 @@
                 </button>
             </div>
 
-            <!-- Графік та результати тепер займають 2 колонки (ширше і красивіше) -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col items-center text-center lg:col-span-2 min-h-[350px] relative w-full overflow-hidden">
                 <div id="idleState" class="text-gray-500 mt-16">
                     <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
@@ -179,10 +197,36 @@
         }
 
         async function handleAuth(action) {
-            const email = document.getElementById('email').value;
+            const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
+            
             const errorDiv = document.getElementById('authError');
-            if (!email || !password) return errorDiv.innerText = "Заповніть всі поля", errorDiv.classList.remove('hidden');
+            const successDiv = document.getElementById('authSuccess');
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
+
+            /* Frontend Client Validation */
+            if (!email || !password) {
+                errorDiv.innerText = "Будь ласка, заповніть всі поля";
+                return errorDiv.classList.remove('hidden');
+            }
+
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                errorDiv.innerText = "Будь ласка, введіть коректний email адрес";
+                return errorDiv.classList.remove('hidden');
+            }
+
+            if (action === 'register') {
+                if (password.length < 8) {
+                    errorDiv.innerText = "Пароль має містити щонайменше 8 символів";
+                    return errorDiv.classList.remove('hidden');
+                }
+                if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+                    errorDiv.innerText = "Пароль має містити хоча б одну літеру та одну цифру";
+                    return errorDiv.classList.remove('hidden');
+                }
+            }
 
             try {
                 const response = await fetch(`/api/auth/${action}`, {
@@ -191,24 +235,54 @@
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error);
-                if (action === 'register') handleAuth('login');
-                else { localStorage.setItem('jwt_token', data.token); showDashboard(); }
+                
+                if (action === 'register') {
+                    successDiv.innerText = "Успішна реєстрація! Тепер ви можете увійти.";
+                    successDiv.classList.remove('hidden');
+                    document.getElementById('password').value = '';
+                } else { 
+                    localStorage.setItem('jwt_token', data.token); 
+                    localStorage.setItem('user_role', data.role); 
+                    showDashboard(); 
+                }
             } catch (error) {
-                errorDiv.innerText = error.message; errorDiv.classList.remove('hidden');
+                errorDiv.innerText = error.message; 
+                errorDiv.classList.remove('hidden');
             }
         }
 
         function showDashboard() {
             document.getElementById('authView').classList.add('hidden');
             document.getElementById('dashboardView').classList.remove('hidden');
+            
+            const role = localStorage.getItem('user_role') || 'standard';
+            const badge = document.getElementById('roleBadge');
+            badge.classList.remove('hidden', 'bg-yellow-500', 'bg-gray-600', 'text-yellow-900', 'text-gray-200');
+            
+            if (role === 'pro') {
+                badge.innerText = 'PRO Account';
+                badge.classList.add('bg-yellow-500', 'text-yellow-900');
+            } else {
+                badge.innerText = 'Standard';
+                badge.classList.add('bg-gray-600', 'text-gray-200');
+            }
+
             setupEventStream();
             loadHistory();
         }
 
         function logout() {
             localStorage.removeItem('jwt_token');
+            localStorage.removeItem('user_role');
             document.getElementById('dashboardView').classList.add('hidden');
             document.getElementById('authView').classList.remove('hidden');
+            
+            // Clear forms
+            document.getElementById('email').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('authError').classList.add('hidden');
+            document.getElementById('authSuccess').classList.add('hidden');
+
             if (window.eventSource) window.eventSource.close();
             if (equityChartInstance) equityChartInstance.destroy();
             document.getElementById('historyTableBody').innerHTML = '';
@@ -336,6 +410,7 @@
         document.getElementById('startBtn').addEventListener('click', async () => {
             const pair = document.getElementById('pair').value;
             const strategy = document.getElementById('strategy').value;
+            const timeframe = document.getElementById('timeframe').value;
             
             const fast_sma = parseInt(document.getElementById('fastSma').value);
             const slow_sma = parseInt(document.getElementById('slowSma').value);
@@ -353,11 +428,24 @@
                 const response = await fetch('/api/analysis/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ pair, strategy, fast_sma, slow_sma, startDate, endDate })
+                    body: JSON.stringify({ pair, timeframe, strategy, fast_sma, slow_sma, startDate, endDate })
                 });
+                
                 if (response.status === 401) { logout(); return; }
                 const data = await response.json();
-                if (!response.ok) throw new Error(data.error);
+                
+                if (!response.ok) {
+                    if (response.status === 403) {
+                        alert(`🛑 Обмеження доступу:\n\n${data.error}`);
+                    } else {
+                        throw new Error(data.error);
+                    }
+                    
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('idleState').classList.remove('hidden');
+                    document.getElementById('processingState').classList.add('hidden');
+                    return;
+                }
                 
                 currentTaskId = data.task_id;
                 document.getElementById('taskIdDisplay').innerText = `ID: ${currentTaskId}`;
