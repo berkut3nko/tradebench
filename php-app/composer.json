@@ -4,7 +4,7 @@
     "type": "project",
     "require": {
         "php": "^8.2",
-        "grpc/grpc": "^1.57",
+        "grpc/grpc": "^1.74",
         "google/protobuf": "^3.25",
         "firebase/php-jwt": "^6.10",
         "vlucas/phpdotenv": "^5.5"
@@ -15,7 +15,8 @@
         },
         "audit": {
             "ignore": [
-                "PKSA-y2cr-5h3j-g3ys"
+                "PKSA-y2cr-5h3j-g3ys",
+                "PKSA-tcfz-w4fm-hhk9"
             ]
         }
     },

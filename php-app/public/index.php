@@ -5,6 +5,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use App\AnalysisClient;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
+use Dotenv\Dotenv;
 
 header('Access-Control-Allow-Origin: *');
 header('Content-Type: application/json');
@@ -18,8 +19,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $method = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-/* JWT Secret Key (in production, use .env) */
-$jwtSecret = getenv('JWT_SECRET') ?: 'vortex_super_secret_key_2026';
+/* Load environment variables from .env file */
+$dotenv = Dotenv::createImmutable(__DIR__ . '/../');
+$dotenv->load();
+
+/* Retrieve secret key from environment */
+$jwtSecret = $_ENV['JWT_SECRET'];
 
 try {
     $pdo = new PDO('pgsql:host=db;port=5432;dbname=analyzer_db', 'user', 'pass', [
