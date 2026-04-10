@@ -78,7 +78,7 @@
                     <div class="w-full bg-gray-700 rounded-full h-2.5 mb-4">
                         <div class="bg-blue-600 h-2.5 rounded-full w-1/2 animate-pulse"></div>
                     </div>
-                    <p id="statusText" class="text-sm text-gray-400">Синхронізація з C++ ядром...</p>
+                    <p id="statusText" class="text-sm text-gray-400">Синхронізація через SSE...</p>
                 </div>
 
                 <div id="completedState" class="hidden w-full">
@@ -86,7 +86,7 @@
                         <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                     </div>
                     <h3 class="text-xl font-bold text-green-400 mb-2">Успішно завершено!</h3>
-                    <p class="text-sm text-gray-400">Результати записані у базу даних.</p>
+                    <p class="text-sm text-gray-400">Прибуток: <span id="profitDisplay" class="font-bold text-white"></span></p>
                 </div>
             </div>
         </div>
@@ -124,7 +124,6 @@
                 if (!response.ok) throw new Error(data.error || 'Authentication failed');
 
                 if (action === 'register') {
-                    // Automatically login after successful registration
                     handleAuth('login');
                 } else if (action === 'login') {
                     localStorage.setItem('jwt_token', data.token);
@@ -140,6 +139,9 @@
         function showDashboard() {
             document.getElementById('authView').classList.add('hidden');
             document.getElementById('dashboardView').classList.remove('hidden');
+            
+            // Connect to Real-Time SSE Stream when dashboard opens
+            setupEventStream();
         }
 
         function logout() {
@@ -149,13 +151,45 @@
             document.getElementById('authForm').reset();
             document.getElementById('authError').classList.add('hidden');
             
-            // Reset dashboard state
             document.getElementById('idleState').classList.remove('hidden');
             document.getElementById('completedState').classList.add('hidden');
             document.getElementById('processingState').classList.add('hidden');
+            
+            if (window.eventSource) {
+                window.eventSource.close();
+            }
         }
 
-        // Dashboard Logic with Auth Header
+        let currentTaskId = null;
+
+        function setupEventStream() {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) return;
+
+            // Initialize SSE connection
+            window.eventSource = new EventSource(`/api/analysis/stream?token=${token}`);
+
+            window.eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                // If we receive an event for the task we are currently waiting for
+                if (data.task_id === currentTaskId && data.status === 'COMPLETED') {
+                    
+                    document.getElementById('processingState').classList.add('hidden');
+                    document.getElementById('completedState').classList.remove('hidden');
+                    document.getElementById('startBtn').disabled = false;
+                    
+                    // Display the profit sent directly from C++ via Redis!
+                    document.getElementById('profitDisplay').innerText = `$${data.profit.toFixed(2)}`;
+                }
+            };
+
+            window.eventSource.onerror = function() {
+                console.error("SSE Connection lost. Reconnecting...");
+            };
+        }
+
+        // Dashboard Logic
         document.getElementById('startBtn').addEventListener('click', async () => {
             const pair = document.getElementById('pair').value;
             const strategy = document.getElementById('strategy').value;
@@ -184,29 +218,11 @@
                 const startData = await startResponse.json();
                 if (!startResponse.ok) throw new Error(startData.error || 'Failed to start');
                 
-                const taskId = startData.task_id;
-                document.getElementById('taskIdDisplay').innerText = `ID: ${taskId}`;
-
-                const pollInterval = setInterval(async () => {
-                    const statusResponse = await fetch(`/api/analysis/status/${taskId}`, {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    
-                    if (statusResponse.status === 401) {
-                        clearInterval(pollInterval);
-                        logout();
-                        return;
-                    }
-
-                    const statusData = await statusResponse.json();
-
-                    if (statusData.status === 'COMPLETED') {
-                        clearInterval(pollInterval);
-                        document.getElementById('processingState').classList.add('hidden');
-                        document.getElementById('completedState').classList.remove('hidden');
-                        document.getElementById('startBtn').disabled = false;
-                    }
-                }, 1000);
+                currentTaskId = startData.task_id;
+                document.getElementById('taskIdDisplay').innerText = `ID: ${currentTaskId}`;
+                
+                // No more polling here! 
+                // We just sit back and let the eventSource.onmessage handle the update.
 
             } catch (error) {
                 alert(`Помилка: ${error.message}`);
