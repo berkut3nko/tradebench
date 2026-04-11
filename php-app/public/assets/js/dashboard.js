@@ -1,5 +1,6 @@
 let equityChartInstance = null;
 let currentTaskId = null;
+let displayedTaskId = null; // НОВА ЗМІННА: Відстежує, який графік зараз на екрані
 
 document.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('jwt_token')) showDashboard();
@@ -15,6 +16,30 @@ document.addEventListener('DOMContentLoaded', () => {
     renderStrategyParams();
 });
 
+// НОВА ФУНКЦІЯ: Повне скидання візуального стану робочої області
+function resetDashboardState() {
+    currentTaskId = null;
+    displayedTaskId = null;
+    
+    // Ховаємо графіки та прогрес-бари, показуємо заглушку
+    document.getElementById('completedState').classList.add('hidden');
+    document.getElementById('processingState').classList.add('hidden');
+    document.getElementById('idleState').classList.remove('hidden');
+    
+    // Знищуємо графік, щоб він не залишався в пам'яті
+    if (equityChartInstance) {
+        equityChartInstance.destroy();
+        equityChartInstance = null;
+    }
+    
+    // Обнуляємо текстові метрики
+    document.getElementById('profitDisplay').innerText = '';
+    document.getElementById('tradesDisplay').innerText = '';
+    document.getElementById('winRateDisplay').innerText = '';
+    document.getElementById('drawdownDisplay').innerText = '';
+    document.getElementById('activeStrategyDisplay').innerText = 'Стратегія';
+}
+
 function renderStrategyParams() {
     const strategy = document.getElementById('strategy').value;
     const box = document.getElementById('paramsBox');
@@ -22,28 +47,58 @@ function renderStrategyParams() {
     if (strategy === 'SMA_CROSS' || strategy === 'EMA_CROSS') {
         box.className = 'grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
-            <div><label class="block text-xs text-gray-400 mb-1">Fast Period</label><input type="number" id="param1" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
-            <div><label class="block text-xs text-gray-400 mb-1">Slow Period</label><input type="number" id="param2" value="21" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Fast Period</label>
+                <input type="number" id="param1" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Slow Period</label>
+                <input type="number" id="param2" value="21" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
         `;
     } else if (strategy === 'RSI') {
         box.className = 'grid grid-cols-3 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
-            <div><label class="block text-xs text-gray-400 mb-1">Period</label><input type="number" id="param1" value="14" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
-            <div><label class="block text-xs text-gray-400 mb-1">Overbought</label><input type="number" id="param2" value="70" min="50" max="99" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
-            <div><label class="block text-xs text-gray-400 mb-1">Oversold</label><input type="number" id="param3" value="30" min="1" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Period</label>
+                <input type="number" id="param1" value="14" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Overbought</label>
+                <input type="number" id="param2" value="70" min="50" max="99" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Oversold</label>
+                <input type="number" id="param3" value="30" min="1" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
         `;
     } else if (strategy === 'MACD') {
         box.className = 'grid grid-cols-3 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
-            <div><label class="block text-xs text-gray-400 mb-1">Fast EMA</label><input type="number" id="param1" value="12" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
-            <div><label class="block text-xs text-gray-400 mb-1">Slow EMA</label><input type="number" id="param2" value="26" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
-            <div><label class="block text-xs text-gray-400 mb-1">Signal EMA</label><input type="number" id="param3" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Fast EMA</label>
+                <input type="number" id="param1" value="12" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Slow EMA</label>
+                <input type="number" id="param2" value="26" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Signal EMA</label>
+                <input type="number" id="param3" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
         `;
     } else if (strategy === 'BOLLINGER') {
         box.className = 'grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
-            <div><label class="block text-xs text-gray-400 mb-1">Period (SMA)</label><input type="number" id="param1" value="20" min="5" max="100" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
-            <div><label class="block text-xs text-gray-400 mb-1">StdDev Multiplier</label><input type="number" step="0.1" id="param2" value="2.0" min="0.5" max="5.0" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Period (SMA)</label>
+                <input type="number" id="param1" value="20" min="5" max="100" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">StdDev Multiplier</label>
+                <input type="number" step="0.1" id="param2" value="2.0" min="0.5" max="5.0" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
         `;
     }
 }
@@ -142,8 +197,10 @@ function logout() {
     document.getElementById('authSuccess').classList.add('hidden');
 
     if (window.eventSource) window.eventSource.close();
-    if (equityChartInstance) equityChartInstance.destroy();
     document.getElementById('historyTableBody').innerHTML = '';
+    
+    // ОЧИЩЕННЯ СТАНУ ПРИ ВИХОДІ
+    resetDashboardState();
 }
 
 async function loadHistory() {
@@ -169,9 +226,10 @@ async function loadHistory() {
             let date = new Date(task.created_at).toLocaleString('uk-UA');
             let safeJson = resultData ? task.result_data.replace(/'/g, "&#39;") : '';
             
+            // ВАЖЛИВО: Передаємо task.task_id в функцію viewHistoricalChart
             let actionBtn = `
                 <div class="flex justify-end gap-3 items-center">
-                    ${resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : ''}
+                    ${resultData ? `<button onclick='viewHistoricalChart(this, "${task.task_id}")' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : ''}
                     <button onclick='deleteBacktest("${task.task_id}")' class="text-red-400 hover:text-red-300 transition p-1" title="Видалити бектест">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     </button>
@@ -206,13 +264,21 @@ async function deleteBacktest(taskId) {
         const data = await response.json();
         
         if (!response.ok) throw new Error(data.error);
+        
+        // ОЧИЩЕННЯ СТАНУ ПРИ ВИДАЛЕННІ: Якщо видаляємо графік, який зараз дивимось - ховаємо його
+        if (taskId === displayedTaskId || taskId === currentTaskId) {
+            resetDashboardState();
+        }
+        
         loadHistory();
     } catch (error) {
         alert(`Помилка видалення: ${error.message}`);
     }
 }
 
-window.viewHistoricalChart = function(btn) {
+// Приймаємо taskId для відстеження стану
+window.viewHistoricalChart = function(btn, taskId) {
+    displayedTaskId = taskId; // Запам'ятовуємо, що дивимось
     const resultData = JSON.parse(btn.getAttribute('data-result'));
     displayResults(resultData);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -453,6 +519,7 @@ function setupEventStream() {
     window.eventSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.task_id === currentTaskId && data.status === 'COMPLETED') {
+            displayedTaskId = data.task_id; // Запам'ятовуємо новий запущений графік
             displayResults(data);
             loadHistory();
         }
@@ -473,8 +540,10 @@ async function startAnalysis() {
     const endDate = document.getElementById('endDate').value;
     const token = localStorage.getItem('jwt_token');
     
+    // Скидаємо відображення попереднього графіка перед запуском нового
+    resetDashboardState();
+    
     document.getElementById('idleState').classList.add('hidden');
-    document.getElementById('completedState').classList.add('hidden');
     document.getElementById('processingState').classList.remove('hidden');
     document.getElementById('startBtn').disabled = true;
 
@@ -495,9 +564,8 @@ async function startAnalysis() {
                 throw new Error(data.error);
             }
             
+            resetDashboardState();
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('idleState').classList.remove('hidden');
-            document.getElementById('processingState').classList.add('hidden');
             return;
         }
         
@@ -505,8 +573,7 @@ async function startAnalysis() {
         document.getElementById('taskIdDisplay').innerText = `ID: ${currentTaskId}`;
     } catch (error) {
         alert(`Помилка: ${error.message}`);
+        resetDashboardState();
         document.getElementById('startBtn').disabled = false;
-        document.getElementById('idleState').classList.remove('hidden');
-        document.getElementById('processingState').classList.add('hidden');
     }
 }
