@@ -620,8 +620,11 @@ public:
                 
                 /* DETECT OPTIMIZATION REQUEST */
                 std::string actual_strategy = strategy_payload;
+                bool is_optimized = false; // НОВА ЗМІННА
+                
                 if (strategy_payload == "OPTIMIZE") {
                     actual_strategy = engine.optimizeParameters(data);
+                    is_optimized = true; // Фіксуємо, що це генетика
                     std::cout << "[Core] Genetic Optimization finished. Found best strategy: " << actual_strategy << std::endl;
                 }
 
@@ -659,6 +662,7 @@ public:
                                     + "\"status\": \"COMPLETED\", "
                                     + "\"timeframe\": \"" + timeframe + "\", "
                                     + "\"strategy\": \"" + actual_strategy + "\", "
+                                    + "\"is_optimized\": " + (is_optimized ? "true" : "false") + ", "
                                     + "\"profit\": " + std::to_string(res.profit) + ", "
                                     + "\"trades\": " + std::to_string(res.trades_count) + ", "
                                     + "\"win_rate\": " + std::to_string(res.win_rate) + ", "

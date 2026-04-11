@@ -230,7 +230,12 @@ async function loadHistory() {
             
             let wrText = resultData && resultData.win_rate !== undefined ? `${resultData.win_rate.toFixed(1)}%` : '-';
             let tfBadge = resultData && resultData.timeframe ? `<span class="text-gray-500 mr-1">[${resultData.timeframe}]</span>` : '';
-            let strategyName = tfBadge + formatStrategyName(resultData ? resultData.strategy : null);
+            
+            // ВАЖЛИВО: Візуальні індикатори Генетики та ШІ
+            let isOptBadge = resultData && resultData.is_optimized ? `<span title="Знадено Генетичним Автопідбором" class="text-purple-400 ml-2 cursor-help">🧬</span>` : '';
+            let hasAiBadge = resultData && resultData.ai_insight ? `<span title="Наявний висновок ШІ" class="text-blue-400 ml-1 cursor-help">✨</span>` : '';
+            
+            let strategyName = tfBadge + formatStrategyName(resultData ? resultData.strategy : null) + isOptBadge + hasAiBadge;
 
             let date = new Date(task.created_at).toLocaleString('uk-UA');
             let safeJson = resultData ? task.result_data.replace(/'/g, "&#39;") : '';
@@ -248,7 +253,7 @@ async function loadHistory() {
                 <tr class="hover:bg-gray-750 transition-colors">
                     <td class="px-4 py-3 text-gray-300">${date}</td>
                     <td class="px-4 py-3 font-bold text-white">${task.pair}</td>
-                    <td class="px-4 py-3 font-mono text-xs text-purple-400">${strategyName}</td>
+                    <td class="px-4 py-3 font-mono text-xs text-gray-300 flex items-center">${strategyName}</td>
                     <td class="px-4 py-3 font-bold ${profitClass}">${profitText}</td>
                     <td class="px-4 py-3 text-green-400">${wrText}</td>
                     <td class="px-4 py-3 text-right">${actionBtn}</td>
@@ -284,12 +289,11 @@ async function deleteBacktest(taskId) {
 }
 
 window.viewHistoricalChart = function(btn, taskId) {
-    displayedTaskId = taskId;
-    // Оскільки ми завантажуємо з історії, вважаємо, що це звичайний аналіз, щоб ШІ був критичним
-    // (Або якщо параметри дуже нестандартні, ШІ сам зверне на це увагу)
-    isCurrentTaskOptimized = false; 
-    
+    displayedTaskId = taskId; 
     const resultData = JSON.parse(btn.getAttribute('data-result'));
+    
+    isCurrentTaskOptimized = resultData.is_optimized === true;
+    
     displayResults(resultData);
     
     if (resultData.strategy) {
@@ -303,6 +307,19 @@ window.viewHistoricalChart = function(btn, taskId) {
             if (parts[1] && document.getElementById('param1')) document.getElementById('param1').value = parts[1];
             if (parts[2] && document.getElementById('param2')) document.getElementById('param2').value = parts[2];
             if (parts[3] && document.getElementById('param3')) document.getElementById('param3').value = parts[3];
+        }
+    }
+    
+    if (resultData.ai_insight) {
+        const askAiBtn = document.getElementById('askAiBtn');
+        const aiEmptyState = document.getElementById('aiEmptyState');
+        const aiResponse = document.getElementById('aiResponse');
+        
+        if (askAiBtn) askAiBtn.classList.add('hidden');
+        if (aiEmptyState) aiEmptyState.classList.add('hidden');
+        if (aiResponse) {
+            aiResponse.classList.remove('hidden');
+            aiResponse.innerHTML = resultData.ai_insight.replace(/\n/g, '<br>');
         }
     }
     
