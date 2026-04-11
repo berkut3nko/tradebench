@@ -49,6 +49,8 @@ try {
     // Analysis Module
     $router->add('POST', '/api/analysis/start', [AnalysisController::class, 'start']);
     $router->add('GET', '/api/analysis/history', [AnalysisController::class, 'history']);
+    // NEW: Маршрут для видалення бектесту
+    $router->add('DELETE', '/api/analysis/history/{id}', [AnalysisController::class, 'deleteHistory']);
     $router->add('GET', '/api/analysis/stream', [AnalysisController::class, 'stream']);
 
     // Admin Module
@@ -66,7 +68,7 @@ try {
     $router->dispatch($method, $uri);
 
 } catch (\Throwable $e) {
-    /* Global Error Handler - Fail-safe (does not rely on autoloader) */
+    /* Global Error Handler - Fail-safe */
     http_response_code(500);
     echo json_encode([
         "error" => "System Error",

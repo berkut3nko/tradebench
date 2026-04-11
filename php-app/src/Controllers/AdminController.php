@@ -6,16 +6,12 @@ use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
 
-/**
- * Handles Administration Panel routes
- */
 class AdminController {
     
     private \PDO $db;
 
     public function __construct() {
         $this->db = Database::getConnection();
-        /* Ensure only admins can initialize this controller */
         AuthMiddleware::authenticate(null, 'admin');
     }
 
@@ -24,6 +20,9 @@ class AdminController {
         Response::json($stmt->fetchAll());
     }
 
+    /* ---------------------------------------------------------
+     * UPDATED: Full Cascade Deletion of User
+     * --------------------------------------------------------- */
     public function deleteUser(string $id): void {
         $authData = AuthMiddleware::authenticate(null, 'admin');
         
@@ -31,10 +30,37 @@ class AdminController {
             Response::error("Cannot delete yourself", 400);
         }
         
-        $stmt = $this->db->prepare("DELETE FROM users WHERE id = ?");
-        $stmt->execute([$id]);
-        
-        Response::json(["message" => "User deleted successfully"]);
+        try {
+            $this->db->beginTransaction();
+            
+            // 1. Видаляємо всі токени авторизації користувача
+            $this->db->prepare("DELETE FROM refresh_tokens WHERE user_id = ?")->execute([$id]);
+
+            // 2. Знаходимо всі завдання (backtests) користувача
+            $tasksStmt = $this->db->prepare("SELECT id FROM analysis_tasks WHERE user_id = ?");
+            $tasksStmt->execute([$id]);
+            $tasks = $tasksStmt->fetchAll(\PDO::FETCH_COLUMN);
+
+            if (!empty($tasks)) {
+                $placeholders = implode(',', array_fill(0, count($tasks), '?'));
+                // Видаляємо результати
+                $this->db->prepare("DELETE FROM analysis_results WHERE task_id IN ($placeholders)")->execute($tasks);
+            }
+
+            // 3. Видаляємо самі завдання
+            $this->db->prepare("DELETE FROM analysis_tasks WHERE user_id = ?")->execute([$id]);
+
+            // 4. І нарешті видаляємо самого користувача
+            $this->db->prepare("DELETE FROM users WHERE id = ?")->execute([$id]);
+
+            $this->db->commit();
+            Response::json(["message" => "User and all associated data deleted successfully"]);
+        } catch (\Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            Response::error("Failed to delete user", 500, $e->getMessage());
+        }
     }
 
     public function updateUser(string $id): void {

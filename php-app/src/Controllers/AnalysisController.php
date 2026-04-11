@@ -2,23 +2,18 @@
 
 namespace App\Controllers;
 
+use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
 use App\AnalysisClient;
-use App\Services\BinanceService;
-use App\Models\CurrencyData;
-use App\Models\AnalysisTask;
 use Predis\Client as RedisClient;
 
-/**
- * Handles Backtesting Core logic and Streaming (Slim Controller)
- */
 class AnalysisController {
     
-    private BinanceService $binanceService;
+    private \PDO $db;
 
     public function __construct() {
-        $this->binanceService = new BinanceService();
+        $this->db = Database::getConnection();
     }
 
     public function start(): void {
@@ -38,7 +33,6 @@ class AnalysisController {
         
         $daysRequested = ($endTimestamp - $startTimestamp) / 86400;
         
-        /* 1. Authorization checks */
         if ($userRole !== 'pro' && $userRole !== 'admin') {
             if ($daysRequested > 30) {
                 Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
@@ -47,37 +41,75 @@ class AnalysisController {
                 Response::error("Custom timeframes are available only for PRO accounts.", 403);
             }
         }
-        
-        /* 2. Data Ingestion (Delegated to Service and Model) */
+
+        /* ---------------------------------------------------------
+         * AUTO-CLEANUP: Garbage Collector for old tasks
+         * --------------------------------------------------------- */
         try {
-            $klines = $this->binanceService->fetchHistoricalData(
-                $pair, 
-                $timeframe, 
-                $startTimestamp * 1000, 
-                $endTimestamp * 1000
-            );
+            $this->db->beginTransaction();
+            // Знаходимо ID всіх тасок старіших за 30 днів
+            $oldTasksStmt = $this->db->query("SELECT id FROM analysis_tasks WHERE created_at < NOW() - INTERVAL '30 days'");
+            $oldTasks = $oldTasksStmt->fetchAll(\PDO::FETCH_COLUMN);
             
-            if (!empty($klines)) {
-                CurrencyData::saveBatch($pair, $timeframe, $klines);
+            if (count($oldTasks) > 0) {
+                $placeholders = implode(',', array_fill(0, count($oldTasks), '?'));
+                // Каскадно видаляємо результати, а потім самі таски
+                $this->db->prepare("DELETE FROM analysis_results WHERE task_id IN ($placeholders)")->execute($oldTasks);
+                $this->db->prepare("DELETE FROM analysis_tasks WHERE id IN ($placeholders)")->execute($oldTasks);
             }
-        } catch (\Exception $e) {
-            // We ignore ingestion errors, core will use existing DB data
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            // Ignore error, non-critical background process
         }
         
-        /* 3. Strategy Configuration */
+        /* Auto-Sync logic */
+        try {
+            $startMs = $startTimestamp * 1000;
+            $endMs = $endTimestamp * 1000;
+            $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval={$timeframe}&startTime={$startMs}&endTime={$endMs}&limit=1000";
+            
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5); 
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            
+            if ($response !== false && $httpCode === 200) {
+                $data = json_decode($response, true);
+                if (is_array($data) && count($data) > 0) {
+                    $this->db->beginTransaction();
+                    $stmtSync = $this->db->prepare("
+                        INSERT INTO currency_data (pair_name, timeframe, tick_time, open_price, high_price, low_price, close_price, volume)
+                        VALUES (?, ?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
+                        ON CONFLICT (pair_name, timeframe, tick_time) DO NOTHING
+                    ");
+                    foreach ($data as $candle) {
+                        $stmtSync->execute([$pair, $timeframe, $candle[0] / 1000, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
+                    }
+                    $this->db->commit();
+                }
+            }
+        } catch (\Throwable $syncError) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+        }
+        
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
-        $params = $input['params'] ?? [9, 21]; 
+        $params = $input['params'] ?? [9, 21];
         
         $strategyPayload = $strategy;
         foreach ($params as $param) {
             $strategyPayload .= ":" . intval($param);
         }
 
-        /* 4. Task Registration (Delegated to Model) */
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
-        AnalysisTask::create($taskId, $userId, $pair);
 
-        /* 5. Trigger gRPC Core */
+        $stmt = $this->db->prepare("INSERT INTO analysis_tasks (id, user_id, pair, status) VALUES (?, ?, ?, 'PENDING')");
+        $stmt->execute([$taskId, $userId, $pair]);
+
         $client = new AnalysisClient('cpp-engine:50051');
         $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategyPayload, $taskId, [
             'start' => $startTimestamp,
@@ -88,7 +120,6 @@ class AnalysisController {
             Response::error("gRPC Engine Error: " . ($grpcResult['error'] ?? 'Unknown'), 500);
         }
 
-        /* 6. Return Response */
         Response::json(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started"], 202);
     }
 
@@ -96,10 +127,50 @@ class AnalysisController {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
         
-        /* Delegated to Model */
-        $history = AnalysisTask::getHistoryByUser($userId);
+        $stmt = $this->db->prepare("
+            SELECT t.id as task_id, t.pair, t.status, t.created_at, r.result_data
+            FROM analysis_tasks t
+            LEFT JOIN analysis_results r ON t.id = r.task_id
+            WHERE t.user_id = ?
+            ORDER BY t.created_at DESC
+            LIMIT 20
+        ");
+        $stmt->execute([$userId]);
+        Response::json($stmt->fetchAll());
+    }
+
+    /* ---------------------------------------------------------
+     * NEW: Delete a specific backtest manually
+     * --------------------------------------------------------- */
+    public function deleteHistory(string $taskId): void {
+        $authData = AuthMiddleware::authenticate();
+        $userId = $authData['id'];
+
+        $stmt = $this->db->prepare("SELECT user_id FROM analysis_tasks WHERE id = ?");
+        $stmt->execute([$taskId]);
+        $task = $stmt->fetch();
+
+        if (!$task) {
+            Response::error("Task not found", 404);
+        }
         
-        Response::json($history);
+        // Перевіряємо чи це завдання належить юзеру (або чи він адмін)
+        if ($task['user_id'] != $userId && $authData['role'] !== 'admin') {
+            Response::error("Unauthorized to delete this task", 403);
+        }
+
+        try {
+            $this->db->beginTransaction();
+            // Спочатку видаляємо результати, потім саме завдання (Manual Cascade)
+            $this->db->prepare("DELETE FROM analysis_results WHERE task_id = ?")->execute([$taskId]);
+            $this->db->prepare("DELETE FROM analysis_tasks WHERE id = ?")->execute([$taskId]);
+            $this->db->commit();
+            
+            Response::json(["message" => "Backtest deleted successfully"]);
+        } catch (\Exception $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            Response::error("Failed to delete backtest", 500);
+        }
     }
 
     public function stream(): void {

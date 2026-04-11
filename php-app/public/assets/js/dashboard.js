@@ -12,11 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('startBtn').addEventListener('click', startAnalysis);
     document.getElementById('strategy').addEventListener('change', renderStrategyParams);
     
-    // Відображаємо параметри стратегії при першому завантаженні
     renderStrategyParams();
 });
 
-// Ця функція вставляє поля з правильними стилями Tailwind
 function renderStrategyParams() {
     const strategy = document.getElementById('strategy').value;
     const box = document.getElementById('paramsBox');
@@ -172,8 +170,15 @@ async function loadHistory() {
             let date = new Date(task.created_at).toLocaleString('uk-UA');
             let safeJson = resultData ? task.result_data.replace(/'/g, "&#39;") : '';
             
-            // ВАЖЛИВО: Стилізована кнопка "Графік"
-            let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : '-';
+            // Додано: Кнопка видалення у вигляді іконки кошика поруч із графіком
+            let actionBtn = `
+                <div class="flex justify-end gap-3 items-center">
+                    ${resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : ''}
+                    <button onclick='deleteBacktest("${task.task_id}")' class="text-red-400 hover:text-red-300 transition p-1" title="Видалити бектест">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </button>
+                </div>
+            `;
 
             tbody.innerHTML += `
                 <tr class="hover:bg-gray-750 transition-colors">
@@ -188,6 +193,27 @@ async function loadHistory() {
         });
     } catch (e) {
         console.error("Failed to load history", e);
+    }
+}
+
+// NEW: Функція видалення бектесту
+async function deleteBacktest(taskId) {
+    if (!confirm('Ви впевнені, що хочете видалити цей бектест з історії?')) return;
+
+    const token = localStorage.getItem('jwt_token');
+    try {
+        const response = await fetch(`/api/analysis/history/${taskId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.error);
+        
+        // Оновлюємо таблицю після видалення
+        loadHistory();
+    } catch (error) {
+        alert(`Помилка видалення: ${error.message}`);
     }
 }
 
@@ -275,7 +301,6 @@ async function startAnalysis() {
     const strategy = document.getElementById('strategy').value;
     const timeframe = document.getElementById('timeframe').value;
     
-    // ВАЖЛИВО: Динамічний збір масиву параметрів
     let params = [];
     if (document.getElementById('param1')) params.push(document.getElementById('param1').value);
     if (document.getElementById('param2')) params.push(document.getElementById('param2').value);
