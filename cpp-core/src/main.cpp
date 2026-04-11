@@ -23,6 +23,14 @@ using analyzer::AnalysisRequest;
 using analyzer::AnalysisResponse;
 
 /**
+ * @brief Structure to hold market data including timestamps
+ */
+struct MarketData {
+    std::vector<long long> timestamps;
+    std::vector<double> prices;
+};
+
+/**
  * @brief Structure to hold the advanced result of a backtest simulation.
  */
 struct BacktestResult {
@@ -31,6 +39,9 @@ struct BacktestResult {
     double win_rate;
     double max_drawdown;
     std::vector<double> equity_curve;
+    std::vector<int> buy_signals;
+    std::vector<int> sell_signals;
+    std::vector<long long> timestamps; // Added timestamps for X-axis rendering
 };
 
 /**
@@ -38,8 +49,15 @@ struct BacktestResult {
  */
 class DataRepository {
 public:
+    /**
+     * @brief Constructor
+     * @param conn_str Database connection string
+     */
     explicit DataRepository(const std::string& conn_str) : m_conn_str(conn_str) {}
 
+    /**
+     * @brief Checks database connectivity
+     */
     bool checkConnection() const {
         try {
             pqxx::connection C(m_conn_str);
@@ -50,13 +68,16 @@ public:
         }
     }
 
-    std::vector<double> fetchPrices(const std::string& pair, const std::string& timeframe, int64_t start_ts, int64_t end_ts) {
-        std::vector<double> prices;
+    /**
+     * @brief Fetches historical close prices and timestamps for a specific trading pair and timeframe.
+     */
+    MarketData fetchPrices(const std::string& pair, const std::string& timeframe, int64_t start_ts, int64_t end_ts) {
+        MarketData data;
         try {
             pqxx::connection C(m_conn_str);
             pqxx::work W(C);
             
-            std::string query = "SELECT close_price FROM currency_data WHERE pair_name = " 
+            std::string query = "SELECT EXTRACT(EPOCH FROM tick_time)::BIGINT, close_price FROM currency_data WHERE pair_name = " 
                               + W.quote(pair) 
                               + " AND timeframe = " + W.quote(timeframe)
                               + " AND tick_time >= to_timestamp(" + std::to_string(start_ts) + ")"
@@ -65,16 +86,22 @@ public:
             
             pqxx::result R = W.exec(query);
             for (auto row : R) {
-                prices.push_back(row[0].as<double>());
+                data.timestamps.push_back(row[0].as<long long>());
+                data.prices.push_back(row[1].as<double>());
             }
-            std::cout << "[Repo] Fetched " << prices.size() << " ticks for " << pair << " (" << timeframe << ") in given range." << std::endl;
+            std::cout << "[Repo] Fetched " << data.prices.size() << " ticks for " << pair << " (" << timeframe << ") in given range." << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "[Repo] Fetch Error: " << e.what() << std::endl;
         }
-        return prices;
+        return data;
     }
 
-    void saveResult(const std::string& task_id, const std::string& strategy_payload, const BacktestResult& res, const std::string& equity_json) {
+    /**
+     * @brief Updates task status and saves the full JSON payload to the database.
+     * @param task_id The UUID of the task
+     * @param result_data The complete JSON string containing all metrics and arrays
+     */
+    void saveResult(const std::string& task_id, const std::string& result_data) {
         try {
             pqxx::connection C(m_conn_str);
             pqxx::work W(C);
@@ -82,13 +109,6 @@ public:
             std::string sql_update = "UPDATE analysis_tasks SET status = 'COMPLETED' WHERE id = " + W.quote(task_id) + ";";
             W.exec(sql_update);
 
-            std::string result_data = "{\"strategy\": \"" + strategy_payload + "\", "
-                                    + "\"profit\": " + std::to_string(res.profit) 
-                                    + ", \"trades\": " + std::to_string(res.trades_count) 
-                                    + ", \"win_rate\": " + std::to_string(res.win_rate)
-                                    + ", \"drawdown\": " + std::to_string(res.max_drawdown)
-                                    + ", \"equity\": " + equity_json + "}";
-                                    
             std::string sql_insert = "INSERT INTO analysis_results (task_id, result_data) VALUES (" + W.quote(task_id) + ", " + W.quote(result_data) + "::jsonb);";
             W.exec(sql_insert);
 
@@ -110,35 +130,33 @@ class BacktestingEngine {
 public:
     /**
      * @brief Main simulation router. Parses payload and delegates to specific strategy logic.
-     * @param prices Vector of historical closing prices.
-     * @param strategy_payload String payload (e.g., "SMA_CROSS:9:21" or "RSI:14:30:70").
+     * @param market_data Historical data containing prices and timestamps.
+     * @param strategy_payload String payload (e.g., "SMA_CROSS:9:21" or "RSI:14:70:30").
      * @return BacktestResult structure.
      */
-    BacktestResult runSimulation(const std::vector<double>& prices, const std::string& strategy_payload) {
+    BacktestResult runSimulation(const MarketData& market_data, const std::string& strategy_payload) {
         std::vector<std::string> tokens = parsePayload(strategy_payload);
         std::string strategy_name = tokens.empty() ? "SMA_CROSS" : tokens[0];
 
         if (strategy_name == "SMA_CROSS" || strategy_name == "EMA_CROSS") {
             int fast = (tokens.size() > 1) ? std::stoi(tokens[1]) : 9;
             int slow = (tokens.size() > 2) ? std::stoi(tokens[2]) : 21;
-            return runMovingAverageCross(prices, fast, slow, strategy_name == "EMA_CROSS");
+            return runMovingAverageCross(market_data, fast, slow, strategy_name == "EMA_CROSS");
         } 
         else if (strategy_name == "RSI") {
             int period = (tokens.size() > 1) ? std::stoi(tokens[1]) : 14;
             double overbought = (tokens.size() > 2) ? std::stod(tokens[2]) : 70.0;
             double oversold = (tokens.size() > 3) ? std::stod(tokens[3]) : 30.0;
-            return runRSI(prices, period, overbought, oversold);
+            return runRSI(market_data, period, overbought, oversold);
         }
 
         /* Fallback */
-        return runMovingAverageCross(prices, 9, 21, false);
+        return runMovingAverageCross(market_data, 9, 21, false);
     }
 
 private:
     /**
      * @brief Parses the colon-separated strategy payload.
-     * @param payload Strategy payload string.
-     * @return Vector of string tokens.
      */
     std::vector<std::string> parsePayload(const std::string& payload) {
         std::vector<std::string> tokens;
@@ -153,8 +171,8 @@ private:
     /**
      * @brief Executes SMA or EMA crossover strategy.
      */
-    BacktestResult runMovingAverageCross(const std::vector<double>& prices, int fast_window, int slow_window, bool use_ema) {
-        BacktestResult result = {0.0, 0, 0.0, 0.0, {}};
+    BacktestResult runMovingAverageCross(const MarketData& market_data, int fast_window, int slow_window, bool use_ema) {
+        BacktestResult result = {0.0, 0, 0.0, 0.0, {}, {}, {}, {}};
         double initial_capital = 1000.0; 
         double current_capital = initial_capital;
         double crypto_amount = 0.0;
@@ -164,15 +182,22 @@ private:
         double entry_price = 0.0;
         bool in_position = false;
 
+        const auto& prices = market_data.prices;
+        const auto& timestamps = market_data.timestamps;
+
         if (fast_window >= slow_window) fast_window = slow_window - 1;
         if (fast_window < 1) fast_window = 1;
 
         if (prices.size() <= static_cast<size_t>(slow_window)) {
             result.equity_curve.push_back(initial_capital);
+            if (!timestamps.empty()) result.timestamps.push_back(timestamps[0]);
             return result;
         }
 
-        for (int i = 0; i < slow_window; ++i) result.equity_curve.push_back(current_capital);
+        for (int i = 0; i < slow_window; ++i) {
+            result.equity_curve.push_back(current_capital);
+            result.timestamps.push_back(timestamps[i]);
+        }
 
         std::vector<double> fast_ma(prices.size(), 0.0);
         std::vector<double> slow_ma(prices.size(), 0.0);
@@ -200,11 +225,14 @@ private:
                 prev_slow /= slow_window;
             }
 
+            int current_step = result.equity_curve.size();
+
             if (!in_position && prev_fast <= prev_slow && current_fast > current_slow) {
                 crypto_amount = current_capital / prices[i];
                 current_capital = 0.0;
                 entry_price = prices[i];
                 in_position = true;
+                result.buy_signals.push_back(current_step);
             }
             else if (in_position && prev_fast >= prev_slow && current_fast < current_slow) {
                 current_capital = crypto_amount * prices[i];
@@ -212,10 +240,13 @@ private:
                 in_position = false;
                 result.trades_count++;
                 if (prices[i] > entry_price) winning_trades++;
+                result.sell_signals.push_back(current_step);
             }
 
             double portfolio_value = in_position ? (crypto_amount * prices[i]) : current_capital;
             result.equity_curve.push_back(portfolio_value);
+            result.timestamps.push_back(timestamps[i]);
+            
             if (portfolio_value > peak_capital) peak_capital = portfolio_value;
             double current_drawdown = (peak_capital - portfolio_value) / peak_capital * 100.0;
             if (current_drawdown > result.max_drawdown) result.max_drawdown = current_drawdown;
@@ -228,8 +259,8 @@ private:
     /**
      * @brief Executes Relative Strength Index (RSI) mean-reversion strategy.
      */
-    BacktestResult runRSI(const std::vector<double>& prices, int period, double overbought, double oversold) {
-        BacktestResult result = {0.0, 0, 0.0, 0.0, {}};
+    BacktestResult runRSI(const MarketData& market_data, int period, double overbought, double oversold) {
+        BacktestResult result = {0.0, 0, 0.0, 0.0, {}, {}, {}, {}};
         double initial_capital = 1000.0; 
         double current_capital = initial_capital;
         double crypto_amount = 0.0;
@@ -239,12 +270,19 @@ private:
         double entry_price = 0.0;
         bool in_position = false;
 
+        const auto& prices = market_data.prices;
+        const auto& timestamps = market_data.timestamps;
+
         if (prices.size() <= static_cast<size_t>(period)) {
             result.equity_curve.push_back(initial_capital);
+            if (!timestamps.empty()) result.timestamps.push_back(timestamps[0]);
             return result;
         }
 
-        for (int i = 0; i < period; ++i) result.equity_curve.push_back(current_capital);
+        for (int i = 0; i < period; ++i) {
+            result.equity_curve.push_back(current_capital);
+            result.timestamps.push_back(timestamps[i]);
+        }
 
         std::vector<double> rsi_values;
         calculateRSI(prices, period, rsi_values);
@@ -253,12 +291,15 @@ private:
             double current_rsi = rsi_values[i];
             double prev_rsi = rsi_values[i-1];
 
+            int current_step = result.equity_curve.size();
+
             /* Buy signal: RSI crosses above oversold level */
             if (!in_position && prev_rsi < oversold && current_rsi >= oversold) {
                 crypto_amount = current_capital / prices[i];
                 current_capital = 0.0;
                 entry_price = prices[i];
                 in_position = true;
+                result.buy_signals.push_back(current_step);
             }
             /* Sell signal: RSI crosses below overbought level */
             else if (in_position && prev_rsi > overbought && current_rsi <= overbought) {
@@ -267,10 +308,13 @@ private:
                 in_position = false;
                 result.trades_count++;
                 if (prices[i] > entry_price) winning_trades++;
+                result.sell_signals.push_back(current_step);
             }
 
             double portfolio_value = in_position ? (crypto_amount * prices[i]) : current_capital;
             result.equity_curve.push_back(portfolio_value);
+            result.timestamps.push_back(timestamps[i]);
+            
             if (portfolio_value > peak_capital) peak_capital = portfolio_value;
             double current_drawdown = (peak_capital - portfolio_value) / peak_capital * 100.0;
             if (current_drawdown > result.max_drawdown) result.max_drawdown = current_drawdown;
@@ -356,13 +400,13 @@ public:
         bool is_db_ok = repo.checkConnection();
 
         if (is_db_ok && !task_id.empty()) {
-            std::thread([req = *request, task_id, strategy_payload, conn_str]() {
+            std::thread([req = *request, task_id, strategy_payload, timeframe, conn_str]() {
                 
                 DataRepository thread_repo(conn_str);
                 BacktestingEngine engine;
 
-                std::vector<double> prices = thread_repo.fetchPrices(req.currency_pair(), req.timeframe(), req.start_timestamp(), req.end_timestamp());
-                BacktestResult res = engine.runSimulation(prices, strategy_payload);
+                MarketData data = thread_repo.fetchPrices(req.currency_pair(), req.timeframe(), req.start_timestamp(), req.end_timestamp());
+                BacktestResult res = engine.runSimulation(data, strategy_payload);
 
                 std::string equity_json = "[";
                 for (size_t i = 0; i < res.equity_curve.size(); ++i) {
@@ -371,23 +415,49 @@ public:
                 }
                 equity_json += "]";
 
-                thread_repo.saveResult(task_id, strategy_payload, res, equity_json);
+                std::string buy_json = "[";
+                for (size_t i = 0; i < res.buy_signals.size(); ++i) {
+                    buy_json += std::to_string(res.buy_signals[i]);
+                    if (i < res.buy_signals.size() - 1) buy_json += ",";
+                }
+                buy_json += "]";
+
+                std::string sell_json = "[";
+                for (size_t i = 0; i < res.sell_signals.size(); ++i) {
+                    sell_json += std::to_string(res.sell_signals[i]);
+                    if (i < res.sell_signals.size() - 1) sell_json += ",";
+                }
+                sell_json += "]";
+
+                // Serialize timestamps
+                std::string ts_json = "[";
+                for (size_t i = 0; i < res.timestamps.size(); ++i) {
+                    ts_json += std::to_string(res.timestamps[i]);
+                    if (i < res.timestamps.size() - 1) ts_json += ",";
+                }
+                ts_json += "]";
+
+                // Pass the timeframe back so the UI can display it
+                std::string payload = "{\"task_id\": \"" + task_id + "\", "
+                                    + "\"status\": \"COMPLETED\", "
+                                    + "\"timeframe\": \"" + timeframe + "\", "
+                                    + "\"strategy\": \"" + strategy_payload + "\", "
+                                    + "\"profit\": " + std::to_string(res.profit) + ", "
+                                    + "\"trades\": " + std::to_string(res.trades_count) + ", "
+                                    + "\"win_rate\": " + std::to_string(res.win_rate) + ", "
+                                    + "\"drawdown\": " + std::to_string(res.max_drawdown) + ", "
+                                    + "\"buy_signals\": " + buy_json + ", "
+                                    + "\"sell_signals\": " + sell_json + ", "
+                                    + "\"timestamps\": " + ts_json + ", "
+                                    + "\"equity\": " + equity_json + "}";
+
+                thread_repo.saveResult(task_id, payload);
                 
                 const char* redis_env = std::getenv("REDIS_HOST");
                 std::string redis_host = redis_env ? redis_env : "redis";
                 
                 redisContext* rc = redisConnect(redis_host.c_str(), 6379);
                 if (rc != nullptr && !rc->err) {
-                    
-                    std::string payload = "{\"task_id\": \"" + task_id + "\", "
-                                        + "\"status\": \"COMPLETED\", "
-                                        + "\"strategy\": \"" + strategy_payload + "\", "
-                                        + "\"profit\": " + std::to_string(res.profit) + ", "
-                                        + "\"trades\": " + std::to_string(res.trades_count) + ", "
-                                        + "\"win_rate\": " + std::to_string(res.win_rate) + ", "
-                                        + "\"drawdown\": " + std::to_string(res.max_drawdown) + ", "
-                                        + "\"equity\": " + equity_json + "}";
-
                     redisReply* reply = static_cast<redisReply*>(redisCommand(rc, "PUBLISH analysis_events %s", payload.c_str()));
                     if (reply != nullptr) freeReplyObject(reply);
                     redisFree(rc);

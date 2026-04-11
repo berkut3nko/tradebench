@@ -113,19 +113,19 @@ function showDashboard() {
     const badge = document.getElementById('roleBadge');
     const adminBtn = document.getElementById('adminPanelBtn');
     
-    badge.classList.remove('hidden', 'bg-yellow-500', 'bg-gray-600', 'bg-red-500', 'text-yellow-900', 'text-gray-200', 'text-red-100');
+    badge.classList.remove('hidden', 'badge-admin', 'badge-pro', 'badge-standard');
     if (adminBtn) adminBtn.classList.add('hidden');
     
     if (role === 'admin') {
         badge.innerText = 'Admin';
-        badge.classList.add('bg-red-500', 'text-red-100');
+        badge.classList.add('badge-admin');
         if (adminBtn) adminBtn.classList.remove('hidden');
     } else if (role === 'pro') {
         badge.innerText = 'PRO Account';
-        badge.classList.add('bg-yellow-500', 'text-yellow-900');
+        badge.classList.add('badge-pro');
     } else {
         badge.innerText = 'Standard';
-        badge.classList.add('bg-gray-600', 'text-gray-200');
+        badge.classList.add('badge-standard');
     }
 
     setupEventStream();
@@ -165,12 +165,12 @@ async function loadHistory() {
             let profitClass = resultData && resultData.profit >= 0 ? 'text-green-400' : (resultData ? 'text-red-400' : '');
             
             let wrText = resultData && resultData.win_rate !== undefined ? `${resultData.win_rate.toFixed(1)}%` : '-';
-            let strategyName = formatStrategyName(resultData ? resultData.strategy : null);
+            let tfBadge = resultData && resultData.timeframe ? `<span class="text-gray-500 mr-1">[${resultData.timeframe}]</span>` : '';
+            let strategyName = tfBadge + formatStrategyName(resultData ? resultData.strategy : null);
 
             let date = new Date(task.created_at).toLocaleString('uk-UA');
             let safeJson = resultData ? task.result_data.replace(/'/g, "&#39;") : '';
             
-            // Додано: Кнопка видалення у вигляді іконки кошика поруч із графіком
             let actionBtn = `
                 <div class="flex justify-end gap-3 items-center">
                     ${resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : ''}
@@ -196,7 +196,6 @@ async function loadHistory() {
     }
 }
 
-// NEW: Функція видалення бектесту
 async function deleteBacktest(taskId) {
     if (!confirm('Ви впевнені, що хочете видалити цей бектест з історії?')) return;
 
@@ -209,8 +208,6 @@ async function deleteBacktest(taskId) {
         const data = await response.json();
         
         if (!response.ok) throw new Error(data.error);
-        
-        // Оновлюємо таблицю після видалення
         loadHistory();
     } catch (error) {
         alert(`Помилка видалення: ${error.message}`);
@@ -223,14 +220,37 @@ window.viewHistoricalChart = function(btn) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
-function renderChart(equityData) {
+// РОЗУМНА ВІСЬ X З НЕПЕРЕРВНИМИ ЛІЧИЛЬНИКАМИ ТА ДЕТЕКТАРАМИ МЕЖ
+function renderChart(equityData, buySignals = [], sellSignals = [], timestamps = [], timeframe = '1h') {
     const ctx = document.getElementById('equityChart').getContext('2d');
     if (equityChartInstance) equityChartInstance.destroy();
 
     const labels = equityData.map((_, i) => i);
-    const isProfit = equityData[equityData.length - 1] >= 1000;
-    const color = isProfit ? '#22c55e' : '#ef4444'; 
-    const bgColor = isProfit ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+    const totalPoints = equityData.length;
+
+    // Менші маркери для запобігання "злипанню"
+    const baseRadius = totalPoints > 500 ? 2 : 4;
+    const hoverRadius = baseRadius + 3;
+
+    const pointRadius = labels.map((_, i) => {
+        if (buySignals.includes(i) || sellSignals.includes(i)) return baseRadius;
+        return 0;
+    });
+
+    const pointBackgroundColor = labels.map((_, i) => {
+        const isBuy = buySignals.includes(i);
+        const isSell = sellSignals.includes(i);
+        
+        if (isBuy && isSell) return '#a855f7'; // Фіолетовий (Вхід і Вихід на одній свічці)
+        if (isBuy) return '#3b82f6'; // Синій (Вхід)
+        if (isSell) return '#eab308'; // Жовтий (Вихід)
+        return 'transparent';
+    });
+
+    const pointBorderWidth = labels.map((_, i) => {
+        if (buySignals.includes(i) || sellSignals.includes(i)) return 1;
+        return 0;
+    });
 
     equityChartInstance = new Chart(ctx, {
         type: 'line',
@@ -239,20 +259,174 @@ function renderChart(equityData) {
             datasets: [{
                 label: 'Капітал ($)',
                 data: equityData,
-                borderColor: color,
-                backgroundColor: bgColor,
-                borderWidth: 2,
-                pointRadius: 0,
-                fill: true,
-                tension: 0.2
+                segment: {
+                    borderColor: ctx => {
+                        if (!ctx.p0 || !ctx.p1) return '#4b5563'; 
+                        const diff = ctx.p1.parsed.y - ctx.p0.parsed.y;
+                        if (diff > 0) return '#22c55e'; // Зелений (в плюсі)
+                        if (diff < 0) return '#ef4444'; // Червоний (в мінусі)
+                        return '#4b5563'; // Сірий (поза ринком)
+                    }
+                },
+                borderWidth: totalPoints > 1000 ? 1 : 2,
+                pointRadius: pointRadius,
+                pointBackgroundColor: pointBackgroundColor,
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: pointBorderWidth,
+                pointHoverRadius: hoverRadius,
+                fill: false, 
+                tension: 0.1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            // Відображатиме підказку ТІЛЬКИ для точки, на яку безпосередньо наведено мишку
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            },
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: function(context) {
+                            const index = context[0].dataIndex;
+                            if (timestamps && timestamps[index]) {
+                                const d = new Date(timestamps[index] * 1000);
+                                return d.toLocaleString('uk-UA');
+                            }
+                            return `Крок ${index}`;
+                        },
+                        label: function(context) {
+                            const index = context.dataIndex;
+                            const isBuy = buySignals.includes(index);
+                            const isSell = sellSignals.includes(index);
+
+                            let label = 'Капітал: $' + context.parsed.y.toFixed(2);
+                            
+                            if (isBuy && isSell) label += ' (ВХІД ТА ВИХІД)';
+                            else if (isBuy) label += ' (ВХІД В УГОДУ)';
+                            else if (isSell) label += ' (ВИХІД З УГОДИ)';
+                            
+                            return label;
+                        }
+                    }
+                }
+            },
             scales: {
-                x: { display: false },
+                x: { 
+                    display: true, 
+                    ticks: { 
+                        color: '#9ca3af', 
+                        font: { size: 10 },
+                        maxRotation: 0,   
+                        minRotation: 0,
+                        autoSkip: false,  // Вимикаємо автоматику Chart.js, повністю керуємо вручну
+                        callback: function(value, index) {
+                            if (!timestamps || timestamps.length === 0) {
+                                const step = Math.max(1, Math.floor(totalPoints / 10));
+                                return index % step === 0 ? `Крок ${index}` : null;
+                            }
+
+                            const ts = timestamps[index];
+                            const d = new Date(ts * 1000);
+                            
+                            const h = d.getHours();
+                            const m = d.getMinutes();
+                            const day = d.getDate();
+                            const month = d.getMonth() + 1;
+                            const year = d.getFullYear();
+
+                            // Форматування рядків
+                            const hStr = h.toString().padStart(2, '0');
+                            const mStr = m.toString().padStart(2, '0');
+                            const dayStr = day.toString().padStart(2, '0');
+                            const moStr = month.toString().padStart(2, '0');
+
+                            // НЕПЕРЕРВНІ лічильники (гарантують відсутність збоїв на стику місяців/років)
+                            const localDate = new Date(year, month - 1, day);
+                            const localDays = Math.round(localDate.getTime() / 86400000); 
+                            const localMonths = year * 12 + month;
+
+                            // Детектори меж (Boundary Detectors) - перевіряють, чи є поточний тік ПЕРШИМ у своєму дні/місяці
+                            let isNewDay = false;
+                            let isNewMonth = false;
+                            
+                            if (index === 0) {
+                                isNewDay = true;
+                                isNewMonth = true;
+                            } else {
+                                const prevD = new Date(timestamps[index - 1] * 1000);
+                                if (prevD.getDate() !== day) isNewDay = true;
+                                if (prevD.getMonth() !== month - 1) isNewMonth = true;
+                            }
+
+                            let show = false;
+                            let format = '';
+
+                            // Жорстка логіка відступів (Decimation Logic)
+                            if (timeframe === '15m') {
+                                if (totalPoints > 2000) { 
+                                    if (isNewDay && localDays % 2 === 0) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else if (totalPoints > 1000) { 
+                                    if (isNewDay) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else if (totalPoints > 300) { 
+                                    if (h % 12 === 0 && m === 0) { show = true; format = `${hStr}:00\n${dayStr}.${moStr}`; }
+                                } else { 
+                                    if (h % 4 === 0 && m === 0) { show = true; format = `${hStr}:00\n${dayStr}.${moStr}`; }
+                                }
+                            } else if (timeframe === '1h') {
+                                if (totalPoints > 2000) { 
+                                    if (isNewDay && localDays % 7 === 0) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else if (totalPoints > 700) { 
+                                    if (isNewDay && localDays % 3 === 0) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else if (totalPoints > 168) { 
+                                    if (isNewDay) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else { 
+                                    if (h % 6 === 0) { show = true; format = `${hStr}:00\n${dayStr}.${moStr}`; }
+                                }
+                            } else if (timeframe === '4h') {
+                                if (totalPoints > 1000) { 
+                                    if (isNewMonth) { show = true; format = `${moStr}.${year}`; }
+                                } else if (totalPoints > 180) { 
+                                    if (isNewDay && localDays % 7 === 0) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else { 
+                                    if (isNewDay) { show = true; format = `${dayStr}.${moStr}`; }
+                                }
+                            } else if (timeframe === '1d') {
+                                if (totalPoints > 700) { 
+                                    if (isNewMonth && localMonths % 3 === 0) { show = true; format = `${moStr}.${year}`; }
+                                } else if (totalPoints > 365) { 
+                                    if (isNewMonth) { show = true; format = `${moStr}.${year}`; }
+                                } else if (totalPoints > 90) { 
+                                    if (isNewDay && localDays % 15 === 0) { show = true; format = `${dayStr}.${moStr}`; }
+                                } else { 
+                                    if (isNewDay && localDays % 5 === 0) { show = true; format = `${dayStr}.${moStr}`; }
+                                }
+                            } else {
+                                // Fallback для будь-якого іншого таймфрейму
+                                const step = Math.max(1, Math.floor(totalPoints / 10));
+                                if (index % step === 0) { show = true; format = `${dayStr}.${moStr}\n${hStr}:${mStr}`; }
+                            }
+
+                            // Повертаємо null щоб повністю проігнорувати і сховати мітку
+                            return show ? format.split('\n') : null;
+                        }
+                    },
+                    grid: { 
+                        display: true,
+                        drawBorder: false,
+                        color: function(context) {
+                            // Малюємо вертикальну лінію ТІЛЬКИ там, де ми повернули масив з текстом
+                            if (context.tick && context.tick.label && context.tick.label.length > 0) {
+                                return 'rgba(75, 85, 99, 0.4)';
+                            }
+                            return 'transparent';
+                        }
+                    }
+                },
                 y: { 
                     ticks: { color: '#9ca3af', font: { size: 10 } },
                     grid: { color: '#374151' }
@@ -268,7 +442,8 @@ function displayResults(data) {
     document.getElementById('completedState').classList.remove('hidden');
     document.getElementById('startBtn').disabled = false;
     
-    document.getElementById('activeStrategyDisplay').innerText = formatStrategyName(data.strategy);
+    let tfBadge = data.timeframe ? `[${data.timeframe}] ` : '';
+    document.getElementById('activeStrategyDisplay').innerText = tfBadge + formatStrategyName(data.strategy);
     
     const profitEl = document.getElementById('profitDisplay');
     profitEl.innerText = `${data.profit >= 0 ? '+' : ''}$${data.profit.toFixed(2)}`;
@@ -279,7 +454,7 @@ function displayResults(data) {
     document.getElementById('drawdownDisplay').innerText = data.drawdown !== undefined ? `-${data.drawdown.toFixed(1)}%` : '0.0%';
     
     if (data.equity && data.equity.length > 0) {
-        renderChart(data.equity);
+        renderChart(data.equity, data.buy_signals, data.sell_signals, data.timestamps, data.timeframe);
     }
 }
 
