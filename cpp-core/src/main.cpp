@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <sstream>
 #include <cmath>
+#include <random>
 
 #include <grpcpp/grpcpp.h>
 #include <pqxx/pqxx>
@@ -50,15 +51,8 @@ struct BacktestResult {
  */
 class DataRepository {
 public:
-    /**
-     * @brief Constructor
-     * @param conn_str Database connection string
-     */
     explicit DataRepository(const std::string& conn_str) : m_conn_str(conn_str) {}
 
-    /**
-     * @brief Checks database connectivity
-     */
     bool checkConnection() const {
         try {
             pqxx::connection C(m_conn_str);
@@ -69,9 +63,6 @@ public:
         }
     }
 
-    /**
-     * @brief Fetches historical close prices and timestamps for a specific trading pair and timeframe.
-     */
     MarketData fetchPrices(const std::string& pair, const std::string& timeframe, int64_t start_ts, int64_t end_ts) {
         MarketData data;
         try {
@@ -97,11 +88,6 @@ public:
         return data;
     }
 
-    /**
-     * @brief Updates task status and saves the full JSON payload to the database.
-     * @param task_id The UUID of the task
-     * @param result_data The complete JSON string containing all metrics and arrays
-     */
     void saveResult(const std::string& task_id, const std::string& result_data) {
         try {
             pqxx::connection C(m_conn_str);
@@ -130,10 +116,89 @@ private:
 class BacktestingEngine {
 public:
     /**
+     * @brief Finds the best strategy and parameters using a Genetic Algorithm.
+     * @param market_data The dataset to backtest against.
+     * @return The best strategy string payload (e.g. "MACD:12:26:9").
+     */
+    std::string optimizeParameters(const MarketData& market_data) {
+        std::mt19937 rng(std::random_device{}());
+        const int POP_SIZE = 40;
+        const int GENERATIONS = 15;
+
+        struct Chromosome {
+            int strat, p1, p2, p3;
+            double fitness;
+        };
+
+        auto generateRandom = [&rng]() -> Chromosome {
+            return {
+                std::uniform_int_distribution<int>(0, 4)(rng),
+                std::uniform_int_distribution<int>(0, 200)(rng),
+                std::uniform_int_distribution<int>(0, 200)(rng),
+                std::uniform_int_distribution<int>(0, 200)(rng),
+                -99999.0
+            };
+        };
+
+        auto getPayload = [](const Chromosome& c) -> std::string {
+            int s = c.strat % 5;
+            int p1 = std::max(2, c.p1 % 50);
+            int p2 = std::max(10, c.p2 % 200);
+            int p3 = std::max(2, c.p3 % 50);
+            if (s == 0) return "SMA_CROSS:" + std::to_string(p1) + ":" + std::to_string(p2);
+            if (s == 1) return "EMA_CROSS:" + std::to_string(p1) + ":" + std::to_string(p2);
+            if (s == 2) return "RSI:" + std::to_string(p1) + ":" + std::to_string(60 + (c.p2 % 30)) + ":" + std::to_string(10 + (c.p3 % 30));
+            if (s == 3) return "MACD:" + std::to_string(p1) + ":" + std::to_string(p2) + ":" + std::to_string(p3);
+            if (s == 4) return "BOLLINGER:" + std::to_string(std::max(5, c.p1 % 100)) + ":" + std::to_string(1.0 + (c.p2 % 30) / 10.0);
+            return "SMA_CROSS:9:21";
+        };
+
+        std::vector<Chromosome> pop(POP_SIZE);
+        for(int i=0; i<POP_SIZE; ++i) pop[i] = generateRandom();
+
+        for (int gen = 0; gen < GENERATIONS; ++gen) {
+            for (auto& c : pop) {
+                if (c.fitness == -99999.0) c.fitness = runSimulation(market_data, getPayload(c)).profit;
+            }
+            std::sort(pop.begin(), pop.end(), [](const Chromosome& a, const Chromosome& b){ return a.fitness > b.fitness; });
+
+            std::vector<Chromosome> nextPop;
+            for(int i=0; i<10; ++i) nextPop.push_back(pop[i]); // Elitism: Keep top 10
+
+            std::uniform_int_distribution<int> distTop(0, 9);
+            std::uniform_real_distribution<double> prob(0.0, 1.0);
+
+            while(nextPop.size() < POP_SIZE) {
+                Chromosome p1 = pop[distTop(rng)];
+                Chromosome p2 = pop[distTop(rng)];
+                Chromosome child = p1;
+                
+                // Crossover
+                if (prob(rng) > 0.5) child.p1 = p2.p1;
+                if (prob(rng) > 0.5) child.p2 = p2.p2;
+                if (prob(rng) > 0.5) child.p3 = p2.p3;
+                
+                // Mutation
+                if (prob(rng) < 0.1) child.strat = std::uniform_int_distribution<int>(0,4)(rng);
+                if (prob(rng) < 0.1) child.p1 = std::uniform_int_distribution<int>(0,200)(rng);
+                if (prob(rng) < 0.1) child.p2 = std::uniform_int_distribution<int>(0,200)(rng);
+                child.fitness = -99999.0;
+                
+                nextPop.push_back(child);
+            }
+            pop = nextPop;
+        }
+
+        for (auto& c : pop) {
+            if (c.fitness == -99999.0) c.fitness = runSimulation(market_data, getPayload(c)).profit;
+        }
+        std::sort(pop.begin(), pop.end(), [](const Chromosome& a, const Chromosome& b){ return a.fitness > b.fitness; });
+        
+        return getPayload(pop[0]);
+    }
+
+    /**
      * @brief Main simulation router. Parses payload and delegates to specific strategy logic.
-     * @param market_data Historical data containing prices and timestamps.
-     * @param strategy_payload String payload (e.g., "MACD:12:26:9" or "BOLLINGER:20:2.0").
-     * @return BacktestResult structure.
      */
     BacktestResult runSimulation(const MarketData& market_data, const std::string& strategy_payload) {
         std::vector<std::string> tokens = parsePayload(strategy_payload);
@@ -162,14 +227,10 @@ public:
             return runBollingerBands(market_data, period, std_dev_mult);
         }
 
-        /* Fallback */
         return runMovingAverageCross(market_data, 9, 21, false);
     }
 
 private:
-    /**
-     * @brief Parses the colon-separated strategy payload.
-     */
     std::vector<std::string> parsePayload(const std::string& payload) {
         std::vector<std::string> tokens;
         std::stringstream ss(payload);
@@ -180,9 +241,6 @@ private:
         return tokens;
     }
 
-    /**
-     * @brief Executes SMA or EMA crossover strategy.
-     */
     BacktestResult runMovingAverageCross(const MarketData& market_data, int fast_window, int slow_window, bool use_ema) {
         BacktestResult result = {0.0, 0, 0.0, 0.0, {}, {}, {}, {}};
         double initial_capital = 1000.0; 
@@ -268,9 +326,6 @@ private:
         return result;
     }
 
-    /**
-     * @brief Executes Relative Strength Index (RSI) strategy.
-     */
     BacktestResult runRSI(const MarketData& market_data, int period, double overbought, double oversold) {
         BacktestResult result = {0.0, 0, 0.0, 0.0, {}, {}, {}, {}};
         double initial_capital = 1000.0; 
@@ -334,12 +389,6 @@ private:
         return result;
     }
 
-    /**
-     * @brief Executes MACD crossover strategy.
-     * @param fast_period Fast EMA period
-     * @param slow_period Slow EMA period
-     * @param signal_period Signal line EMA period
-     */
     BacktestResult runMACD(const MarketData& market_data, int fast_period, int slow_period, int signal_period) {
         BacktestResult result = {0.0, 0, 0.0, 0.0, {}, {}, {}, {}};
         double initial_capital = 1000.0; 
@@ -421,10 +470,6 @@ private:
         return result;
     }
 
-    /**
-     * @brief Executes Bollinger Bands reversal strategy.
-     * @warning Mean reversion: buys at lower band, sells at upper band.
-     */
     BacktestResult runBollingerBands(const MarketData& market_data, int period, double std_dev_multiplier) {
         BacktestResult result = {0.0, 0, 0.0, 0.0, {}, {}, {}, {}};
         double initial_capital = 1000.0; 
@@ -453,7 +498,7 @@ private:
         for (size_t i = period; i < prices.size(); ++i) {
             double sum = 0.0;
             for (int j = 0; j < period; ++j) {
-                sum += prices[i - j - 1]; // Use historical window
+                sum += prices[i - j - 1]; 
             }
             double sma = sum / period;
 
@@ -498,9 +543,6 @@ private:
         return result;
     }
 
-    /**
-     * @brief Helper to calculate Exponential Moving Average.
-     */
     void calculateEMA(const std::vector<double>& source, int period, int start_idx, std::vector<double>& ema_out) {
         if (source.size() < static_cast<size_t>(start_idx + period)) return;
         double multiplier = 2.0 / (period + 1.0);
@@ -514,9 +556,6 @@ private:
         }
     }
 
-    /**
-     * @brief Helper to calculate Relative Strength Index.
-     */
     void calculateRSI(const std::vector<double>& prices, int period, std::vector<double>& rsi_out) {
         rsi_out.resize(prices.size(), 0.0);
         double gain = 0.0, loss = 0.0;
@@ -544,9 +583,6 @@ private:
         }
     }
 
-    /**
-     * @brief Finalizes PnL and Win Rate calculation.
-     */
     void finalizeMetrics(BacktestResult& res, double last_price, double initial, double current, double amount, bool in_pos, int wins) {
         double final_value = in_pos ? (amount * last_price) : current;
         res.profit = final_value - initial;
@@ -581,7 +617,15 @@ public:
                 BacktestingEngine engine;
 
                 MarketData data = thread_repo.fetchPrices(req.currency_pair(), req.timeframe(), req.start_timestamp(), req.end_timestamp());
-                BacktestResult res = engine.runSimulation(data, strategy_payload);
+                
+                /* DETECT OPTIMIZATION REQUEST */
+                std::string actual_strategy = strategy_payload;
+                if (strategy_payload == "OPTIMIZE") {
+                    actual_strategy = engine.optimizeParameters(data);
+                    std::cout << "[Core] Genetic Optimization finished. Found best strategy: " << actual_strategy << std::endl;
+                }
+
+                BacktestResult res = engine.runSimulation(data, actual_strategy);
 
                 std::string equity_json = "[";
                 for (size_t i = 0; i < res.equity_curve.size(); ++i) {
@@ -614,7 +658,7 @@ public:
                 std::string payload = "{\"task_id\": \"" + task_id + "\", "
                                     + "\"status\": \"COMPLETED\", "
                                     + "\"timeframe\": \"" + timeframe + "\", "
-                                    + "\"strategy\": \"" + strategy_payload + "\", "
+                                    + "\"strategy\": \"" + actual_strategy + "\", "
                                     + "\"profit\": " + std::to_string(res.profit) + ", "
                                     + "\"trades\": " + std::to_string(res.trades_count) + ", "
                                     + "\"win_rate\": " + std::to_string(res.win_rate) + ", "

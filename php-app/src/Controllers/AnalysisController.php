@@ -6,14 +6,17 @@ use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
 use App\AnalysisClient;
+use App\Services\BinanceService;
 use Predis\Client as RedisClient;
 
 class AnalysisController {
     
     private \PDO $db;
+    private BinanceService $binanceService;
 
     public function __construct() {
         $this->db = Database::getConnection();
+        $this->binanceService = new BinanceService();
     }
 
     public function start(): void {
@@ -42,67 +45,55 @@ class AnalysisController {
             }
         }
 
-        /* ---------------------------------------------------------
-         * AUTO-CLEANUP: Garbage Collector for old tasks
-         * --------------------------------------------------------- */
         try {
             $this->db->beginTransaction();
-            // Знаходимо ID всіх тасок старіших за 30 днів
             $oldTasksStmt = $this->db->query("SELECT id FROM analysis_tasks WHERE created_at < NOW() - INTERVAL '30 days'");
             $oldTasks = $oldTasksStmt->fetchAll(\PDO::FETCH_COLUMN);
             
             if (count($oldTasks) > 0) {
                 $placeholders = implode(',', array_fill(0, count($oldTasks), '?'));
-                // Каскадно видаляємо результати, а потім самі таски
                 $this->db->prepare("DELETE FROM analysis_results WHERE task_id IN ($placeholders)")->execute($oldTasks);
                 $this->db->prepare("DELETE FROM analysis_tasks WHERE id IN ($placeholders)")->execute($oldTasks);
             }
             $this->db->commit();
         } catch (\Throwable $e) {
             if ($this->db->inTransaction()) $this->db->rollBack();
-            // Ignore error, non-critical background process
         }
         
-        /* Auto-Sync logic */
         try {
-            $startMs = $startTimestamp * 1000;
-            $endMs = $endTimestamp * 1000;
-            $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval={$timeframe}&startTime={$startMs}&endTime={$endMs}&limit=1000";
+            $klines = $this->binanceService->fetchHistoricalData(
+                $pair, 
+                $timeframe, 
+                $startTimestamp * 1000, 
+                $endTimestamp * 1000
+            );
             
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-            curl_setopt($ch, CURLOPT_TIMEOUT, 5); 
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            if ($response !== false && $httpCode === 200) {
-                $data = json_decode($response, true);
-                if (is_array($data) && count($data) > 0) {
-                    $this->db->beginTransaction();
-                    $stmtSync = $this->db->prepare("
-                        INSERT INTO currency_data (pair_name, timeframe, tick_time, open_price, high_price, low_price, close_price, volume)
-                        VALUES (?, ?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
-                        ON CONFLICT (pair_name, timeframe, tick_time) DO NOTHING
-                    ");
-                    foreach ($data as $candle) {
-                        $stmtSync->execute([$pair, $timeframe, $candle[0] / 1000, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
-                    }
-                    $this->db->commit();
+            if (!empty($klines)) {
+                $this->db->beginTransaction();
+                $stmtSync = $this->db->prepare("
+                    INSERT INTO currency_data (pair_name, timeframe, tick_time, open_price, high_price, low_price, close_price, volume)
+                    VALUES (?, ?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
+                    ON CONFLICT (pair_name, timeframe, tick_time) DO NOTHING
+                ");
+                foreach ($klines as $candle) {
+                    $stmtSync->execute([$pair, $timeframe, $candle[0] / 1000, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
                 }
+                $this->db->commit();
             }
         } catch (\Throwable $syncError) {
             if ($this->db->inTransaction()) $this->db->rollBack();
         }
         
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
-        $params = $input['params'] ?? [9, 21];
+        $params = $input['params'] ?? [];
         
         $strategyPayload = $strategy;
-        foreach ($params as $param) {
-            $strategyPayload .= ":" . intval($param);
+        
+        /* Якщо це не оптимізація, додаємо параметри. Інакше залишаємо просто "OPTIMIZE" */
+        if ($strategy !== 'OPTIMIZE') {
+            foreach ($params as $param) {
+                $strategyPayload .= ":" . floatval($param);
+            }
         }
 
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
@@ -139,9 +130,6 @@ class AnalysisController {
         Response::json($stmt->fetchAll());
     }
 
-    /* ---------------------------------------------------------
-     * NEW: Delete a specific backtest manually
-     * --------------------------------------------------------- */
     public function deleteHistory(string $taskId): void {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
@@ -154,14 +142,12 @@ class AnalysisController {
             Response::error("Task not found", 404);
         }
         
-        // Перевіряємо чи це завдання належить юзеру (або чи він адмін)
         if ($task['user_id'] != $userId && $authData['role'] !== 'admin') {
             Response::error("Unauthorized to delete this task", 403);
         }
 
         try {
             $this->db->beginTransaction();
-            // Спочатку видаляємо результати, потім саме завдання (Manual Cascade)
             $this->db->prepare("DELETE FROM analysis_results WHERE task_id = ?")->execute([$taskId]);
             $this->db->prepare("DELETE FROM analysis_tasks WHERE id = ?")->execute([$taskId]);
             $this->db->commit();

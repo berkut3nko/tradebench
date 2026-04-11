@@ -79,6 +79,7 @@
                 <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Основа стратегії</label>
                     <select id="strategy" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500">
+                        <option value="OPTIMIZE" class="font-bold text-purple-400">🌟 Генетичний ШІ-Автопідбір</option>    
                         <option value="SMA_CROSS">SMA Crossover (Ковзне середнє)</option>
                         <option value="EMA_CROSS">EMA Crossover (Експоненційне)</option>
                         <option value="RSI">RSI (Індекс відносної сили)</option>
