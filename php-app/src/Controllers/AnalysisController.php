@@ -2,18 +2,23 @@
 
 namespace App\Controllers;
 
-use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
 use App\AnalysisClient;
+use App\Services\BinanceService;
+use App\Models\CurrencyData;
+use App\Models\AnalysisTask;
 use Predis\Client as RedisClient;
 
+/**
+ * Handles Backtesting Core logic and Streaming (Slim Controller)
+ */
 class AnalysisController {
     
-    private \PDO $db;
+    private BinanceService $binanceService;
 
     public function __construct() {
-        $this->db = Database::getConnection();
+        $this->binanceService = new BinanceService();
     }
 
     public function start(): void {
@@ -33,6 +38,7 @@ class AnalysisController {
         
         $daysRequested = ($endTimestamp - $startTimestamp) / 86400;
         
+        /* 1. Authorization checks */
         if ($userRole !== 'pro' && $userRole !== 'admin') {
             if ($daysRequested > 30) {
                 Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
@@ -42,54 +48,36 @@ class AnalysisController {
             }
         }
         
+        /* 2. Data Ingestion (Delegated to Service and Model) */
         try {
-            $startMs = $startTimestamp * 1000;
-            $endMs = $endTimestamp * 1000;
-            $url = "https://api.binance.com/api/v3/klines?symbol={$pair}&interval={$timeframe}&startTime={$startMs}&endTime={$endMs}&limit=1000";
+            $klines = $this->binanceService->fetchHistoricalData(
+                $pair, 
+                $timeframe, 
+                $startTimestamp * 1000, 
+                $endTimestamp * 1000
+            );
             
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-            curl_setopt($ch, CURLOPT_TIMEOUT, 5); 
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            if ($response !== false && $httpCode === 200) {
-                $data = json_decode($response, true);
-                if (is_array($data) && count($data) > 0) {
-                    $this->db->beginTransaction();
-                    $stmtSync = $this->db->prepare("
-                        INSERT INTO currency_data (pair_name, timeframe, tick_time, open_price, high_price, low_price, close_price, volume)
-                        VALUES (?, ?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
-                        ON CONFLICT (pair_name, timeframe, tick_time) DO NOTHING
-                    ");
-                    foreach ($data as $candle) {
-                        $stmtSync->execute([$pair, $timeframe, $candle[0] / 1000, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
-                    }
-                    $this->db->commit();
-                }
+            if (!empty($klines)) {
+                CurrencyData::saveBatch($pair, $timeframe, $klines);
             }
-        } catch (\Throwable $syncError) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+        } catch (\Exception $e) {
+            // We ignore ingestion errors, core will use existing DB data
         }
         
-        /* ВАЖЛИВО: Гнучке парсіння параметрів (array -> string) */
+        /* 3. Strategy Configuration */
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
-        $params = $input['params'] ?? [9, 21]; // Default fallback
+        $params = $input['params'] ?? [9, 21]; 
         
-        // Збираємо строку на кшталт "RSI:14:70:30"
         $strategyPayload = $strategy;
         foreach ($params as $param) {
             $strategyPayload .= ":" . intval($param);
         }
 
+        /* 4. Task Registration (Delegated to Model) */
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
+        AnalysisTask::create($taskId, $userId, $pair);
 
-        $stmt = $this->db->prepare("INSERT INTO analysis_tasks (id, user_id, pair, status) VALUES (?, ?, ?, 'PENDING')");
-        $stmt->execute([$taskId, $userId, $pair]);
-
+        /* 5. Trigger gRPC Core */
         $client = new AnalysisClient('cpp-engine:50051');
         $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategyPayload, $taskId, [
             'start' => $startTimestamp,
@@ -100,6 +88,7 @@ class AnalysisController {
             Response::error("gRPC Engine Error: " . ($grpcResult['error'] ?? 'Unknown'), 500);
         }
 
+        /* 6. Return Response */
         Response::json(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started"], 202);
     }
 
@@ -107,16 +96,10 @@ class AnalysisController {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
         
-        $stmt = $this->db->prepare("
-            SELECT t.id as task_id, t.pair, t.status, t.created_at, r.result_data
-            FROM analysis_tasks t
-            LEFT JOIN analysis_results r ON t.id = r.task_id
-            WHERE t.user_id = ?
-            ORDER BY t.created_at DESC
-            LIMIT 10
-        ");
-        $stmt->execute([$userId]);
-        Response::json($stmt->fetchAll());
+        /* Delegated to Model */
+        $history = AnalysisTask::getHistoryByUser($userId);
+        
+        Response::json($history);
     }
 
     public function stream(): void {
@@ -162,9 +145,7 @@ class AnalysisController {
                 echo ": keepalive\n\n";
                 @ob_flush();
                 flush();
-                
                 if (connection_aborted()) break;
-                
                 try {
                     $redis->disconnect();
                     $redis->connect();
