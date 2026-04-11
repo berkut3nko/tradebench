@@ -8,9 +8,6 @@ use App\Core\AuthMiddleware;
 use App\AnalysisClient;
 use Predis\Client as RedisClient;
 
-/**
- * Handles Backtesting Core logic and Streaming
- */
 class AnalysisController {
     
     private \PDO $db;
@@ -36,17 +33,15 @@ class AnalysisController {
         
         $daysRequested = ($endTimestamp - $startTimestamp) / 86400;
         
-        /* Role-based limitations (Admin automatically gets PRO privileges) */
         if ($userRole !== 'pro' && $userRole !== 'admin') {
             if ($daysRequested > 30) {
-                Response::error("Standard accounts are limited to 30 days of backtesting. Upgrade to PRO.", 403);
+                Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
             }
             if ($timeframe !== '1h') {
                 Response::error("Custom timeframes are available only for PRO accounts.", 403);
             }
         }
         
-        /* Auto-Sync logic */
         try {
             $startMs = $startTimestamp * 1000;
             $endMs = $endTimestamp * 1000;
@@ -80,10 +75,16 @@ class AnalysisController {
             if ($this->db->inTransaction()) $this->db->rollBack();
         }
         
+        /* ВАЖЛИВО: Гнучке парсіння параметрів (array -> string) */
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
-        $fast_sma = intval($input['fast_sma'] ?? 9);
-        $slow_sma = intval($input['slow_sma'] ?? 21);
-        $strategyPayload = sprintf("%s:%d:%d", $strategy, $fast_sma, $slow_sma);
+        $params = $input['params'] ?? [9, 21]; // Default fallback
+        
+        // Збираємо строку на кшталт "RSI:14:70:30"
+        $strategyPayload = $strategy;
+        foreach ($params as $param) {
+            $strategyPayload .= ":" . intval($param);
+        }
+
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
 
         $stmt = $this->db->prepare("INSERT INTO analysis_tasks (id, user_id, pair, status) VALUES (?, ?, ?, 'PENDING')");

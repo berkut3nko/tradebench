@@ -9,15 +9,56 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('startDate').value = thirtyDaysAgo;
     document.getElementById('endDate').value = today;
 
-    // Реєструємо обробники подй
     document.getElementById('startBtn').addEventListener('click', startAnalysis);
+    document.getElementById('strategy').addEventListener('change', renderStrategyParams);
+    
+    // Відображаємо параметри стратегії при першому завантаженні
+    renderStrategyParams();
 });
+
+// Ця функція вставляє поля з правильними стилями Tailwind
+function renderStrategyParams() {
+    const strategy = document.getElementById('strategy').value;
+    const box = document.getElementById('paramsBox');
+    
+    if (strategy === 'SMA_CROSS' || strategy === 'EMA_CROSS') {
+        box.className = 'grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
+        box.innerHTML = `
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Fast Period</label>
+                <input type="number" id="param1" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Slow Period</label>
+                <input type="number" id="param2" value="21" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+        `;
+    } else if (strategy === 'RSI') {
+        box.className = 'grid grid-cols-3 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
+        box.innerHTML = `
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Period</label>
+                <input type="number" id="param1" value="14" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Overbought</label>
+                <input type="number" id="param2" value="70" min="50" max="99" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Oversold</label>
+                <input type="number" id="param3" value="30" min="1" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
+            </div>
+        `;
+    }
+}
 
 function formatStrategyName(rawName) {
     if (!rawName) return 'Невідомо';
     if (rawName.includes(':')) {
         const parts = rawName.split(':');
-        return `${parts[0].replace('_CROSS', '')} Crossover (${parts[1]}, ${parts[2]})`;
+        let name = parts[0].replace('_CROSS', ' Crossover');
+        parts.shift();
+        return `${name} (${parts.join(', ')})`;
     }
     return rawName;
 }
@@ -36,19 +77,9 @@ async function handleAuth(action) {
         return errorDiv.classList.remove('hidden');
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-        errorDiv.innerText = "Будь ласка, введіть коректний email адрес";
-        return errorDiv.classList.remove('hidden');
-    }
-
     if (action === 'register') {
         if (password.length < 8) {
             errorDiv.innerText = "Пароль має містити щонайменше 8 символів";
-            return errorDiv.classList.remove('hidden');
-        }
-        if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-            errorDiv.innerText = "Пароль має містити хоча б одну літеру та одну цифру";
             return errorDiv.classList.remove('hidden');
         }
     }
@@ -133,25 +164,25 @@ async function loadHistory() {
         data.forEach(task => {
             let resultData = task.result_data ? JSON.parse(task.result_data) : null;
             let profitText = resultData ? `$${resultData.profit.toFixed(2)}` : '-';
-            let profitClass = resultData && resultData.profit >= 0 ? 'text-green-500' : (resultData ? 'text-red-500' : '');
+            let profitClass = resultData && resultData.profit >= 0 ? 'text-green-400' : (resultData ? 'text-red-400' : '');
             
             let wrText = resultData && resultData.win_rate !== undefined ? `${resultData.win_rate.toFixed(1)}%` : '-';
             let strategyName = formatStrategyName(resultData ? resultData.strategy : null);
 
             let date = new Date(task.created_at).toLocaleString('uk-UA');
-            
-            // Екрануємо JSON для безпечної передачі в атрибут
             let safeJson = resultData ? task.result_data.replace(/'/g, "&#39;") : '';
-            let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${safeJson}' class="text-blue-400 hover:text-blue-300 font-medium">Графік</button>` : '-';
+            
+            // ВАЖЛИВО: Стилізована кнопка "Графік"
+            let actionBtn = resultData ? `<button onclick='viewHistoricalChart(this)' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : '-';
 
             tbody.innerHTML += `
-                <tr class="border-b border-gray-800 hover:bg-gray-750">
-                    <td class="px-4 py-3">${date}</td>
+                <tr class="hover:bg-gray-750 transition-colors">
+                    <td class="px-4 py-3 text-gray-300">${date}</td>
                     <td class="px-4 py-3 font-bold text-white">${task.pair}</td>
                     <td class="px-4 py-3 font-mono text-xs text-purple-400">${strategyName}</td>
                     <td class="px-4 py-3 font-bold ${profitClass}">${profitText}</td>
                     <td class="px-4 py-3 text-green-400">${wrText}</td>
-                    <td class="px-4 py-3">${actionBtn}</td>
+                    <td class="px-4 py-3 text-right">${actionBtn}</td>
                 </tr>
             `;
         });
@@ -215,7 +246,7 @@ function displayResults(data) {
     
     const profitEl = document.getElementById('profitDisplay');
     profitEl.innerText = `${data.profit >= 0 ? '+' : ''}$${data.profit.toFixed(2)}`;
-    profitEl.className = `font-bold text-lg ${data.profit >= 0 ? 'text-green-500' : 'text-red-500'}`;
+    profitEl.className = `font-bold text-lg ${data.profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
     
     document.getElementById('tradesDisplay').innerText = data.trades || 0;
     document.getElementById('winRateDisplay').innerText = data.win_rate !== undefined ? `${data.win_rate.toFixed(1)}%` : '0.0%';
@@ -244,8 +275,11 @@ async function startAnalysis() {
     const strategy = document.getElementById('strategy').value;
     const timeframe = document.getElementById('timeframe').value;
     
-    const fast_sma = parseInt(document.getElementById('fastSma').value);
-    const slow_sma = parseInt(document.getElementById('slowSma').value);
+    // ВАЖЛИВО: Динамічний збір масиву параметрів
+    let params = [];
+    if (document.getElementById('param1')) params.push(document.getElementById('param1').value);
+    if (document.getElementById('param2')) params.push(document.getElementById('param2').value);
+    if (document.getElementById('param3')) params.push(document.getElementById('param3').value);
     
     const startDate = document.getElementById('startDate').value;
     const endDate = document.getElementById('endDate').value;
@@ -260,7 +294,7 @@ async function startAnalysis() {
         const response = await fetch('/api/analysis/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ pair, timeframe, strategy, fast_sma, slow_sma, startDate, endDate })
+            body: JSON.stringify({ pair, timeframe, strategy, params, startDate, endDate })
         });
         
         if (response.status === 401) { logout(); return; }

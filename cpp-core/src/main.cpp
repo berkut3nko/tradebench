@@ -7,6 +7,7 @@
 #include <vector>
 #include <numeric>
 #include <algorithm>
+#include <sstream>
 
 #include <grpcpp/grpcpp.h>
 #include <pqxx/pqxx>
@@ -49,14 +50,6 @@ public:
         }
     }
 
-    /**
-     * @brief Fetches historical close prices for a specific trading pair and timeframe.
-     * @param pair The currency pair to query.
-     * @param timeframe The resolution of the data (e.g., '1h', '15m').
-     * @param start_ts Unix timestamp for the start date.
-     * @param end_ts Unix timestamp for the end date.
-     * @return A vector of closing prices.
-     */
     std::vector<double> fetchPrices(const std::string& pair, const std::string& timeframe, int64_t start_ts, int64_t end_ts) {
         std::vector<double> prices;
         try {
@@ -81,9 +74,6 @@ public:
         return prices;
     }
 
-    /**
-     * @brief Updates task status and saves advanced metrics to the database.
-     */
     void saveResult(const std::string& task_id, const std::string& strategy_payload, const BacktestResult& res, const std::string& equity_json) {
         try {
             pqxx::connection C(m_conn_str);
@@ -92,7 +82,6 @@ public:
             std::string sql_update = "UPDATE analysis_tasks SET status = 'COMPLETED' WHERE id = " + W.quote(task_id) + ";";
             W.exec(sql_update);
 
-            /* Include full strategy payload (e.g. SMA_CROSS:10:50) in JSON result */
             std::string result_data = "{\"strategy\": \"" + strategy_payload + "\", "
                                     + "\"profit\": " + std::to_string(res.profit) 
                                     + ", \"trades\": " + std::to_string(res.trades_count) 
@@ -120,40 +109,52 @@ private:
 class BacktestingEngine {
 public:
     /**
-     * @brief Runs SMA Crossover simulation parsing dynamic parameters.
+     * @brief Main simulation router. Parses payload and delegates to specific strategy logic.
      * @param prices Vector of historical closing prices.
-     * @param strategy_payload Strategy definition string (e.g., "SMA_CROSS:10:50").
+     * @param strategy_payload String payload (e.g., "SMA_CROSS:9:21" or "RSI:14:30:70").
+     * @return BacktestResult structure.
      */
     BacktestResult runSimulation(const std::vector<double>& prices, const std::string& strategy_payload) {
-        BacktestResult result;
-        result.profit = 0.0;
-        result.trades_count = 0;
-        result.win_rate = 0.0;
-        result.max_drawdown = 0.0;
-        
-        int short_window = 9;
-        int long_window = 21;
+        std::vector<std::string> tokens = parsePayload(strategy_payload);
+        std::string strategy_name = tokens.empty() ? "SMA_CROSS" : tokens[0];
 
-        /* Parse dynamic parameters from the string */
-        size_t first_colon = strategy_payload.find(':');
-        if (first_colon != std::string::npos) {
-            size_t second_colon = strategy_payload.find(':', first_colon + 1);
-            if (second_colon != std::string::npos) {
-                try {
-                    short_window = std::stoi(strategy_payload.substr(first_colon + 1, second_colon - first_colon - 1));
-                    long_window = std::stoi(strategy_payload.substr(second_colon + 1));
-                } catch (...) {
-                    /* Fallback to defaults on parse error */
-                }
-            }
+        if (strategy_name == "SMA_CROSS" || strategy_name == "EMA_CROSS") {
+            int fast = (tokens.size() > 1) ? std::stoi(tokens[1]) : 9;
+            int slow = (tokens.size() > 2) ? std::stoi(tokens[2]) : 21;
+            return runMovingAverageCross(prices, fast, slow, strategy_name == "EMA_CROSS");
+        } 
+        else if (strategy_name == "RSI") {
+            int period = (tokens.size() > 1) ? std::stoi(tokens[1]) : 14;
+            double overbought = (tokens.size() > 2) ? std::stod(tokens[2]) : 70.0;
+            double oversold = (tokens.size() > 3) ? std::stod(tokens[3]) : 30.0;
+            return runRSI(prices, period, overbought, oversold);
         }
 
-        /* Sanity checks for user inputs */
-        if (short_window >= long_window) short_window = long_window - 1;
-        if (short_window < 1) short_window = 1;
+        /* Fallback */
+        return runMovingAverageCross(prices, 9, 21, false);
+    }
 
-        std::cout << "[Engine] Starting simulation using dynamic windows - Fast: " << short_window << ", Slow: " << long_window << std::endl;
+private:
+    /**
+     * @brief Parses the colon-separated strategy payload.
+     * @param payload Strategy payload string.
+     * @return Vector of string tokens.
+     */
+    std::vector<std::string> parsePayload(const std::string& payload) {
+        std::vector<std::string> tokens;
+        std::stringstream ss(payload);
+        std::string item;
+        while (std::getline(ss, item, ':')) {
+            tokens.push_back(item);
+        }
+        return tokens;
+    }
 
+    /**
+     * @brief Executes SMA or EMA crossover strategy.
+     */
+    BacktestResult runMovingAverageCross(const std::vector<double>& prices, int fast_window, int slow_window, bool use_ema) {
+        BacktestResult result = {0.0, 0, 0.0, 0.0, {}};
         double initial_capital = 1000.0; 
         double current_capital = initial_capital;
         double crypto_amount = 0.0;
@@ -163,64 +164,176 @@ public:
         double entry_price = 0.0;
         bool in_position = false;
 
-        if (prices.size() <= static_cast<size_t>(long_window)) {
-            std::cerr << "[Engine] Not enough data to run simulation for this window." << std::endl;
+        if (fast_window >= slow_window) fast_window = slow_window - 1;
+        if (fast_window < 1) fast_window = 1;
+
+        if (prices.size() <= static_cast<size_t>(slow_window)) {
             result.equity_curve.push_back(initial_capital);
             return result;
         }
 
-        for (int i = 0; i < long_window; ++i) {
-            result.equity_curve.push_back(current_capital);
+        for (int i = 0; i < slow_window; ++i) result.equity_curve.push_back(current_capital);
+
+        std::vector<double> fast_ma(prices.size(), 0.0);
+        std::vector<double> slow_ma(prices.size(), 0.0);
+
+        if (use_ema) {
+            calculateEMA(prices, fast_window, fast_ma);
+            calculateEMA(prices, slow_window, slow_ma);
         }
 
-        for (size_t i = long_window; i < prices.size(); ++i) {
-            double short_sma = 0.0, long_sma = 0.0;
-            double prev_short_sma = 0.0, prev_long_sma = 0.0;
+        for (size_t i = slow_window; i < prices.size(); ++i) {
+            double current_fast = 0.0, current_slow = 0.0;
+            double prev_fast = 0.0, prev_slow = 0.0;
 
-            for(int j = 0; j < short_window; ++j) short_sma += prices[i - j];
-            short_sma /= short_window;
+            if (use_ema) {
+                current_fast = fast_ma[i]; current_slow = slow_ma[i];
+                prev_fast = fast_ma[i-1]; prev_slow = slow_ma[i-1];
+            } else {
+                for(int j = 0; j < fast_window; ++j) current_fast += prices[i - j];
+                current_fast /= fast_window;
+                for(int j = 0; j < slow_window; ++j) current_slow += prices[i - j];
+                current_slow /= slow_window;
+                for(int j = 1; j <= fast_window; ++j) prev_fast += prices[i - j];
+                prev_fast /= fast_window;
+                for(int j = 1; j <= slow_window; ++j) prev_slow += prices[i - j];
+                prev_slow /= slow_window;
+            }
 
-            for(int j = 0; j < long_window; ++j) long_sma += prices[i - j];
-            long_sma /= long_window;
-
-            for(int j = 1; j <= short_window; ++j) prev_short_sma += prices[i - j];
-            prev_short_sma /= short_window;
-
-            for(int j = 1; j <= long_window; ++j) prev_long_sma += prices[i - j];
-            prev_long_sma /= long_window;
-
-            if (!in_position && prev_short_sma <= prev_long_sma && short_sma > long_sma) {
+            if (!in_position && prev_fast <= prev_slow && current_fast > current_slow) {
                 crypto_amount = current_capital / prices[i];
                 current_capital = 0.0;
                 entry_price = prices[i];
                 in_position = true;
             }
-            else if (in_position && prev_short_sma >= prev_long_sma && short_sma < long_sma) {
+            else if (in_position && prev_fast >= prev_slow && current_fast < current_slow) {
                 current_capital = crypto_amount * prices[i];
                 crypto_amount = 0.0;
                 in_position = false;
-                
                 result.trades_count++;
                 if (prices[i] > entry_price) winning_trades++;
             }
 
             double portfolio_value = in_position ? (crypto_amount * prices[i]) : current_capital;
             result.equity_curve.push_back(portfolio_value);
-            
             if (portfolio_value > peak_capital) peak_capital = portfolio_value;
-            
             double current_drawdown = (peak_capital - portfolio_value) / peak_capital * 100.0;
             if (current_drawdown > result.max_drawdown) result.max_drawdown = current_drawdown;
         }
 
-        double final_value = in_position ? (crypto_amount * prices.back()) : current_capital;
-        result.profit = final_value - initial_capital;
-        
-        if (result.trades_count > 0) {
-            result.win_rate = (static_cast<double>(winning_trades) / result.trades_count) * 100.0;
-        }
-                  
+        finalizeMetrics(result, prices.back(), initial_capital, current_capital, crypto_amount, in_position, winning_trades);
         return result;
+    }
+
+    /**
+     * @brief Executes Relative Strength Index (RSI) mean-reversion strategy.
+     */
+    BacktestResult runRSI(const std::vector<double>& prices, int period, double overbought, double oversold) {
+        BacktestResult result = {0.0, 0, 0.0, 0.0, {}};
+        double initial_capital = 1000.0; 
+        double current_capital = initial_capital;
+        double crypto_amount = 0.0;
+        
+        double peak_capital = initial_capital;
+        int winning_trades = 0;
+        double entry_price = 0.0;
+        bool in_position = false;
+
+        if (prices.size() <= static_cast<size_t>(period)) {
+            result.equity_curve.push_back(initial_capital);
+            return result;
+        }
+
+        for (int i = 0; i < period; ++i) result.equity_curve.push_back(current_capital);
+
+        std::vector<double> rsi_values;
+        calculateRSI(prices, period, rsi_values);
+
+        for (size_t i = period; i < prices.size(); ++i) {
+            double current_rsi = rsi_values[i];
+            double prev_rsi = rsi_values[i-1];
+
+            /* Buy signal: RSI crosses above oversold level */
+            if (!in_position && prev_rsi < oversold && current_rsi >= oversold) {
+                crypto_amount = current_capital / prices[i];
+                current_capital = 0.0;
+                entry_price = prices[i];
+                in_position = true;
+            }
+            /* Sell signal: RSI crosses below overbought level */
+            else if (in_position && prev_rsi > overbought && current_rsi <= overbought) {
+                current_capital = crypto_amount * prices[i];
+                crypto_amount = 0.0;
+                in_position = false;
+                result.trades_count++;
+                if (prices[i] > entry_price) winning_trades++;
+            }
+
+            double portfolio_value = in_position ? (crypto_amount * prices[i]) : current_capital;
+            result.equity_curve.push_back(portfolio_value);
+            if (portfolio_value > peak_capital) peak_capital = portfolio_value;
+            double current_drawdown = (peak_capital - portfolio_value) / peak_capital * 100.0;
+            if (current_drawdown > result.max_drawdown) result.max_drawdown = current_drawdown;
+        }
+
+        finalizeMetrics(result, prices.back(), initial_capital, current_capital, crypto_amount, in_position, winning_trades);
+        return result;
+    }
+
+    /**
+     * @brief Helper to calculate Exponential Moving Average.
+     */
+    void calculateEMA(const std::vector<double>& prices, int period, std::vector<double>& ema) {
+        double multiplier = 2.0 / (period + 1.0);
+        double initial_sma = 0.0;
+        for (int i = 0; i < period; ++i) initial_sma += prices[i];
+        initial_sma /= period;
+        
+        ema[period - 1] = initial_sma;
+        for (size_t i = period; i < prices.size(); ++i) {
+            ema[i] = ((prices[i] - ema[i-1]) * multiplier) + ema[i-1];
+        }
+    }
+
+    /**
+     * @brief Helper to calculate Relative Strength Index.
+     */
+    void calculateRSI(const std::vector<double>& prices, int period, std::vector<double>& rsi_out) {
+        rsi_out.resize(prices.size(), 0.0);
+        double gain = 0.0, loss = 0.0;
+
+        for (int i = 1; i <= period; ++i) {
+            double change = prices[i] - prices[i-1];
+            if (change > 0) gain += change;
+            else loss -= change;
+        }
+        gain /= period;
+        loss /= period;
+        
+        rsi_out[period] = loss == 0 ? 100.0 : 100.0 - (100.0 / (1.0 + (gain / loss)));
+
+        for (size_t i = period + 1; i < prices.size(); ++i) {
+            double change = prices[i] - prices[i-1];
+            double current_gain = change > 0 ? change : 0.0;
+            double current_loss = change < 0 ? -change : 0.0;
+
+            gain = ((gain * (period - 1)) + current_gain) / period;
+            loss = ((loss * (period - 1)) + current_loss) / period;
+
+            if (loss == 0) rsi_out[i] = 100.0;
+            else rsi_out[i] = 100.0 - (100.0 / (1.0 + (gain / loss)));
+        }
+    }
+
+    /**
+     * @brief Finalizes PnL and Win Rate calculation.
+     */
+    void finalizeMetrics(BacktestResult& res, double last_price, double initial, double current, double amount, bool in_pos, int wins) {
+        double final_value = in_pos ? (amount * last_price) : current;
+        res.profit = final_value - initial;
+        if (res.trades_count > 0) {
+            res.win_rate = (static_cast<double>(wins) / res.trades_count) * 100.0;
+        }
     }
 };
 
@@ -234,7 +347,7 @@ public:
         std::string strategy_payload = request->strategy_name();
         std::string timeframe = request->timeframe();
         
-        std::cout << "[Core] RPC received for Task: " << task_id << " | Strategy: " << strategy_payload << " | Timeframe: " << timeframe << std::endl;
+        std::cout << "[Core] RPC Task: " << task_id << " | Strategy: " << strategy_payload << " | Timeframe: " << timeframe << std::endl;
 
         const char* db_env = std::getenv("DB_CONNECTION");
         std::string conn_str = db_env ? db_env : "postgresql://user:pass@db:5432/analyzer_db";
@@ -248,7 +361,6 @@ public:
                 DataRepository thread_repo(conn_str);
                 BacktestingEngine engine;
 
-                /* Fetch prices based on the provided timestamp range and timeframe */
                 std::vector<double> prices = thread_repo.fetchPrices(req.currency_pair(), req.timeframe(), req.start_timestamp(), req.end_timestamp());
                 BacktestResult res = engine.runSimulation(prices, strategy_payload);
 
