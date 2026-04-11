@@ -7,7 +7,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeBench | Dashboard</title>
-    <!-- Повертаємо Tailwind для ідеального вигляду -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="assets/css/styles.css">
 </head>
@@ -55,7 +54,6 @@
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <!-- Ліва панель налаштувань -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 lg:col-span-1 h-fit shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 text-blue-400">Аналітика</h2>
                 
@@ -84,13 +82,12 @@
                         <option value="SMA_CROSS">SMA Crossover (Ковзне середнє)</option>
                         <option value="EMA_CROSS">EMA Crossover (Експоненційне)</option>
                         <option value="RSI">RSI (Індекс відносної сили)</option>
+                        <option value="MACD">MACD (Розбіжність ковзних середніх)</option>
+                        <option value="BOLLINGER">Bollinger Bands (Смуги Боллінджера)</option>
                     </select>
                 </div>
                 
-                <!-- Dynamic Parameter Box -->
-                <div id="paramsBox" class="mb-4">
-                    <!-- JS буде вставляти сюди гріди -->
-                </div>
+                <div id="paramsBox" class="mb-4"></div>
                 
                 <div class="grid grid-cols-2 gap-4 mb-6 relative">
                     <div>
@@ -107,7 +104,6 @@
                 <button id="startBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition shadow-lg">Запустити бектест</button>
             </div>
 
-            <!-- Права панель візуалізації -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col items-center text-center lg:col-span-2 min-h-[350px] relative w-full overflow-hidden shadow-lg">
                 
                 <div id="idleState" class="text-gray-500 mt-16">

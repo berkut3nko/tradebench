@@ -22,30 +22,28 @@ function renderStrategyParams() {
     if (strategy === 'SMA_CROSS' || strategy === 'EMA_CROSS') {
         box.className = 'grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">Fast Period</label>
-                <input type="number" id="param1" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">Slow Period</label>
-                <input type="number" id="param2" value="21" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
-            </div>
+            <div><label class="block text-xs text-gray-400 mb-1">Fast Period</label><input type="number" id="param1" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">Slow Period</label><input type="number" id="param2" value="21" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
         `;
     } else if (strategy === 'RSI') {
         box.className = 'grid grid-cols-3 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">Period</label>
-                <input type="number" id="param1" value="14" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">Overbought</label>
-                <input type="number" id="param2" value="70" min="50" max="99" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">Oversold</label>
-                <input type="number" id="param3" value="30" min="1" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
-            </div>
+            <div><label class="block text-xs text-gray-400 mb-1">Period</label><input type="number" id="param1" value="14" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">Overbought</label><input type="number" id="param2" value="70" min="50" max="99" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">Oversold</label><input type="number" id="param3" value="30" min="1" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+        `;
+    } else if (strategy === 'MACD') {
+        box.className = 'grid grid-cols-3 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
+        box.innerHTML = `
+            <div><label class="block text-xs text-gray-400 mb-1">Fast EMA</label><input type="number" id="param1" value="12" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">Slow EMA</label><input type="number" id="param2" value="26" min="10" max="200" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">Signal EMA</label><input type="number" id="param3" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+        `;
+    } else if (strategy === 'BOLLINGER') {
+        box.className = 'grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
+        box.innerHTML = `
+            <div><label class="block text-xs text-gray-400 mb-1">Period (SMA)</label><input type="number" id="param1" value="20" min="5" max="100" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">StdDev Multiplier</label><input type="number" step="0.1" id="param2" value="2.0" min="0.5" max="5.0" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
         `;
     }
 }
@@ -220,7 +218,6 @@ window.viewHistoricalChart = function(btn) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
-// РОЗУМНА ВІСЬ X З НЕПЕРЕРВНИМИ ЛІЧИЛЬНИКАМИ ТА ДЕТЕКТАРАМИ МЕЖ
 function renderChart(equityData, buySignals = [], sellSignals = [], timestamps = [], timeframe = '1h') {
     const ctx = document.getElementById('equityChart').getContext('2d');
     if (equityChartInstance) equityChartInstance.destroy();
@@ -228,7 +225,6 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
     const labels = equityData.map((_, i) => i);
     const totalPoints = equityData.length;
 
-    // Менші маркери для запобігання "злипанню"
     const baseRadius = totalPoints > 500 ? 2 : 4;
     const hoverRadius = baseRadius + 3;
 
@@ -241,9 +237,9 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
         const isBuy = buySignals.includes(i);
         const isSell = sellSignals.includes(i);
         
-        if (isBuy && isSell) return '#a855f7'; // Фіолетовий (Вхід і Вихід на одній свічці)
-        if (isBuy) return '#3b82f6'; // Синій (Вхід)
-        if (isSell) return '#eab308'; // Жовтий (Вихід)
+        if (isBuy && isSell) return '#a855f7'; 
+        if (isBuy) return '#3b82f6'; 
+        if (isSell) return '#eab308'; 
         return 'transparent';
     });
 
@@ -263,9 +259,9 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
                     borderColor: ctx => {
                         if (!ctx.p0 || !ctx.p1) return '#4b5563'; 
                         const diff = ctx.p1.parsed.y - ctx.p0.parsed.y;
-                        if (diff > 0) return '#22c55e'; // Зелений (в плюсі)
-                        if (diff < 0) return '#ef4444'; // Червоний (в мінусі)
-                        return '#4b5563'; // Сірий (поза ринком)
+                        if (diff > 0) return '#22c55e'; 
+                        if (diff < 0) return '#ef4444'; 
+                        return '#4b5563'; 
                     }
                 },
                 borderWidth: totalPoints > 1000 ? 1 : 2,
@@ -281,7 +277,6 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            // Відображатиме підказку ТІЛЬКИ для точки, на яку безпосередньо наведено мишку
             interaction: {
                 mode: 'nearest',
                 axis: 'x',
@@ -323,7 +318,7 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
                         font: { size: 10 },
                         maxRotation: 0,   
                         minRotation: 0,
-                        autoSkip: false,  // Вимикаємо автоматику Chart.js, повністю керуємо вручну
+                        autoSkip: false,  
                         callback: function(value, index) {
                             if (!timestamps || timestamps.length === 0) {
                                 const step = Math.max(1, Math.floor(totalPoints / 10));
@@ -339,18 +334,15 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
                             const month = d.getMonth() + 1;
                             const year = d.getFullYear();
 
-                            // Форматування рядків
                             const hStr = h.toString().padStart(2, '0');
                             const mStr = m.toString().padStart(2, '0');
                             const dayStr = day.toString().padStart(2, '0');
                             const moStr = month.toString().padStart(2, '0');
 
-                            // НЕПЕРЕРВНІ лічильники (гарантують відсутність збоїв на стику місяців/років)
                             const localDate = new Date(year, month - 1, day);
                             const localDays = Math.round(localDate.getTime() / 86400000); 
                             const localMonths = year * 12 + month;
 
-                            // Детектори меж (Boundary Detectors) - перевіряють, чи є поточний тік ПЕРШИМ у своєму дні/місяці
                             let isNewDay = false;
                             let isNewMonth = false;
                             
@@ -366,7 +358,6 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
                             let show = false;
                             let format = '';
 
-                            // Жорстка логіка відступів (Decimation Logic)
                             if (timeframe === '15m') {
                                 if (totalPoints > 2000) { 
                                     if (isNewDay && localDays % 2 === 0) { show = true; format = `${dayStr}.${moStr}`; }
@@ -406,12 +397,10 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
                                     if (isNewDay && localDays % 5 === 0) { show = true; format = `${dayStr}.${moStr}`; }
                                 }
                             } else {
-                                // Fallback для будь-якого іншого таймфрейму
                                 const step = Math.max(1, Math.floor(totalPoints / 10));
                                 if (index % step === 0) { show = true; format = `${dayStr}.${moStr}\n${hStr}:${mStr}`; }
                             }
 
-                            // Повертаємо null щоб повністю проігнорувати і сховати мітку
                             return show ? format.split('\n') : null;
                         }
                     },
@@ -419,7 +408,6 @@ function renderChart(equityData, buySignals = [], sellSignals = [], timestamps =
                         display: true,
                         drawBorder: false,
                         color: function(context) {
-                            // Малюємо вертикальну лінію ТІЛЬКИ там, де ми повернули масив з текстом
                             if (context.tick && context.tick.label && context.tick.label.length > 0) {
                                 return 'rgba(75, 85, 99, 0.4)';
                             }
