@@ -10,6 +10,7 @@ use App\Core\Response;
 use App\Controllers\AuthController;
 use App\Controllers\AnalysisController;
 use App\Controllers\AdminController;
+use App\Controllers\AiController;
 
 /* ---------------------------------------------------------
  * CORE SETTINGS & CORS
@@ -52,6 +53,9 @@ try {
     // NEW: Маршрут для видалення бектесту
     $router->add('DELETE', '/api/analysis/history/{id}', [AnalysisController::class, 'deleteHistory']);
     $router->add('GET', '/api/analysis/stream', [AnalysisController::class, 'stream']);
+
+    // AI Module
+    $router->add('POST', '/api/ai/analyze-result', [AiController::class, 'analyzeResult']);
 
     // Admin Module
     $router->add('GET', '/api/admin/users', [AdminController::class, 'getUsers']);

@@ -1,17 +1,28 @@
 let equityChartInstance = null;
 let currentTaskId = null;
 let displayedTaskId = null;
+let isCurrentTaskOptimized = false; // Зберігає контекст походження графіка для ШІ
 
 document.addEventListener('DOMContentLoaded', () => {
-    if (localStorage.getItem('jwt_token')) showDashboard();
+    try {
+        if (localStorage.getItem('jwt_token')) showDashboard();
+    } catch (e) {
+        console.error("Помилка відновлення сесії:", e);
+    }
     
     const today = new Date().toISOString().split('T')[0];
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    document.getElementById('startDate').value = thirtyDaysAgo;
-    document.getElementById('endDate').value = today;
+    
+    const startDateEl = document.getElementById('startDate');
+    const endDateEl = document.getElementById('endDate');
+    if (startDateEl) startDateEl.value = thirtyDaysAgo;
+    if (endDateEl) endDateEl.value = today;
 
-    document.getElementById('startBtn').addEventListener('click', startAnalysis);
-    document.getElementById('strategy').addEventListener('change', renderStrategyParams);
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn) startBtn.addEventListener('click', startAnalysis);
+    
+    const strategyEl = document.getElementById('strategy');
+    if (strategyEl) strategyEl.addEventListener('change', renderStrategyParams);
     
     renderStrategyParams();
 });
@@ -19,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function resetDashboardState() {
     currentTaskId = null;
     displayedTaskId = null;
+    isCurrentTaskOptimized = false;
     
     document.getElementById('completedState').classList.add('hidden');
     document.getElementById('processingState').classList.add('hidden');
@@ -34,22 +46,27 @@ function resetDashboardState() {
     document.getElementById('winRateDisplay').innerText = '';
     document.getElementById('drawdownDisplay').innerText = '';
     document.getElementById('activeStrategyDisplay').innerText = 'Стратегія';
+
+    const askAiBtn = document.getElementById('askAiBtn');
+    const aiResponse = document.getElementById('aiResponse');
+    const aiEmptyState = document.getElementById('aiEmptyState');
+    
+    if (askAiBtn) askAiBtn.classList.add('hidden');
+    if (aiResponse) {
+        aiResponse.classList.add('hidden');
+        aiResponse.innerText = '';
+    }
+    if (aiEmptyState) aiEmptyState.classList.remove('hidden');
 }
 
 function renderStrategyParams() {
-    const strategy = document.getElementById('strategy').value;
+    const strategyEl = document.getElementById('strategy');
     const box = document.getElementById('paramsBox');
     
-    if (strategy === 'OPTIMIZE') {
-        box.className = 'bg-purple-900/30 p-4 rounded border border-purple-500/50 text-center mb-4';
-        box.innerHTML = `
-            <div class="flex items-center justify-center gap-2 text-purple-400 mb-2">
-                <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                <span class="font-bold">Генетичний алгоритм</span>
-            </div>
-            <p class="text-xs text-gray-300">C++ ядро еволюційним методом перебере сотні комбінацій параметрів та стратегій, щоб знайти найприбутковішу для обраного періоду.</p>
-        `;
-    } else if (strategy === 'SMA_CROSS' || strategy === 'EMA_CROSS') {
+    if (!strategyEl || !box) return;
+    const strategy = strategyEl.value;
+    
+    if (strategy === 'SMA_CROSS' || strategy === 'EMA_CROSS') {
         box.className = 'grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700';
         box.innerHTML = `
             <div><label class="block text-xs text-gray-400 mb-1">Fast Period</label><input type="number" id="param1" value="9" min="2" max="50" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500"></div>
@@ -141,19 +158,37 @@ function showDashboard() {
     const badge = document.getElementById('roleBadge');
     const adminBtn = document.getElementById('adminPanelBtn');
     
+    const aiLock = document.getElementById('aiProLock');
+    const aiContent = document.getElementById('aiContent');
+    const optLock = document.getElementById('optimizeProLock');
+    const optBtn = document.getElementById('optimizeBtn');
+    const optDesc = document.getElementById('optimizeDesc');
+    
     badge.classList.remove('hidden', 'badge-admin', 'badge-pro', 'badge-standard');
     if (adminBtn) adminBtn.classList.add('hidden');
     
-    if (role === 'admin') {
-        badge.innerText = 'Admin';
-        badge.classList.add('badge-admin');
-        if (adminBtn) adminBtn.classList.remove('hidden');
-    } else if (role === 'pro') {
-        badge.innerText = 'PRO Account';
-        badge.classList.add('badge-pro');
+    if (role === 'admin' || role === 'pro') {
+        if (role === 'admin') {
+            badge.innerText = 'Admin';
+            badge.classList.add('badge-admin');
+            if (adminBtn) adminBtn.classList.remove('hidden');
+        } else {
+            badge.innerText = 'PRO Account';
+            badge.classList.add('badge-pro');
+        }
+        if (aiLock) aiLock.classList.add('hidden');
+        if (aiContent) aiContent.classList.remove('hidden');
+        if (optLock) optLock.classList.add('hidden');
+        if (optBtn) optBtn.classList.remove('hidden');
+        if (optDesc) optDesc.classList.remove('hidden');
     } else {
         badge.innerText = 'Standard';
         badge.classList.add('badge-standard');
+        if (aiLock) aiLock.classList.remove('hidden');
+        if (aiContent) aiContent.classList.add('hidden');
+        if (optLock) optLock.classList.remove('hidden');
+        if (optBtn) optBtn.classList.add('hidden');
+        if (optDesc) optDesc.classList.add('hidden');
     }
 
     setupEventStream();
@@ -249,9 +284,28 @@ async function deleteBacktest(taskId) {
 }
 
 window.viewHistoricalChart = function(btn, taskId) {
-    displayedTaskId = taskId; 
+    displayedTaskId = taskId;
+    // Оскільки ми завантажуємо з історії, вважаємо, що це звичайний аналіз, щоб ШІ був критичним
+    // (Або якщо параметри дуже нестандартні, ШІ сам зверне на це увагу)
+    isCurrentTaskOptimized = false; 
+    
     const resultData = JSON.parse(btn.getAttribute('data-result'));
     displayResults(resultData);
+    
+    if (resultData.strategy) {
+        const parts = resultData.strategy.split(':');
+        const stratName = parts[0].replace('_CROSS', '_CROSS');
+        const strategySelect = document.getElementById('strategy');
+        
+        if (Array.from(strategySelect.options).some(opt => opt.value === stratName)) {
+            strategySelect.value = stratName;
+            renderStrategyParams();
+            if (parts[1] && document.getElementById('param1')) document.getElementById('param1').value = parts[1];
+            if (parts[2] && document.getElementById('param2')) document.getElementById('param2').value = parts[2];
+            if (parts[3] && document.getElementById('param3')) document.getElementById('param3').value = parts[3];
+        }
+    }
+    
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
@@ -465,7 +519,24 @@ function displayResults(data) {
     document.getElementById('idleState').classList.add('hidden');
     document.getElementById('processingState').classList.add('hidden');
     document.getElementById('completedState').classList.remove('hidden');
+    
     document.getElementById('startBtn').disabled = false;
+    const optBtn = document.getElementById('optimizeBtn');
+    if (optBtn) optBtn.disabled = false;
+    
+    if (data.strategy && data.strategy.includes(':')) {
+        const parts = data.strategy.split(':');
+        const stratName = parts[0].replace('_CROSS', '_CROSS');
+        const strategySelect = document.getElementById('strategy');
+        
+        if (Array.from(strategySelect.options).some(opt => opt.value === stratName)) {
+            strategySelect.value = stratName;
+            renderStrategyParams();
+            if (parts[1] && document.getElementById('param1')) document.getElementById('param1').value = parts[1];
+            if (parts[2] && document.getElementById('param2')) document.getElementById('param2').value = parts[2];
+            if (parts[3] && document.getElementById('param3')) document.getElementById('param3').value = parts[3];
+        }
+    }
     
     let tfBadge = data.timeframe ? `[${data.timeframe}] ` : '';
     document.getElementById('activeStrategyDisplay').innerText = tfBadge + formatStrategyName(data.strategy);
@@ -480,6 +551,53 @@ function displayResults(data) {
     
     if (data.equity && data.equity.length > 0) {
         renderChart(data.equity, data.buy_signals, data.sell_signals, data.timestamps, data.timeframe);
+    }
+
+    const askAiBtn = document.getElementById('askAiBtn');
+    const aiEmptyState = document.getElementById('aiEmptyState');
+    const aiResponse = document.getElementById('aiResponse');
+    
+    if (displayedTaskId && askAiBtn) {
+        if (aiEmptyState) aiEmptyState.classList.add('hidden');
+        if (aiResponse) aiResponse.classList.add('hidden');
+        askAiBtn.classList.remove('hidden');
+    }
+}
+
+async function askAI() {
+    if (!displayedTaskId) return;
+
+    const token = localStorage.getItem('jwt_token');
+    const btn = document.getElementById('askAiBtn');
+    const loader = document.getElementById('aiLoader');
+    const responseBox = document.getElementById('aiResponse');
+
+    if (btn) btn.classList.add('hidden');
+    if (responseBox) responseBox.classList.add('hidden');
+    if (loader) loader.classList.remove('hidden');
+
+    try {
+        const response = await fetch('/api/ai/analyze-result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            // Передаємо контекст, чи був цей графік результатом оптимізації
+            body: JSON.stringify({ task_id: displayedTaskId, is_optimized: isCurrentTaskOptimized })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.error);
+        
+        if (loader) loader.classList.add('hidden');
+        if (responseBox) {
+            responseBox.classList.remove('hidden');
+            responseBox.innerHTML = data.insight.replace(/\n/g, '<br>');
+        }
+        
+    } catch (error) {
+        if (loader) loader.classList.add('hidden');
+        if (btn) btn.classList.remove('hidden');
+        alert(`Помилка ШІ: ${error.message}`);
     }
 }
 
@@ -503,21 +621,28 @@ async function startAnalysis() {
     const timeframe = document.getElementById('timeframe').value;
     
     let params = [];
-    if (strategy !== 'OPTIMIZE') {
-        if (document.getElementById('param1')) params.push(document.getElementById('param1').value);
-        if (document.getElementById('param2')) params.push(document.getElementById('param2').value);
-        if (document.getElementById('param3')) params.push(document.getElementById('param3').value);
-    }
+    if (document.getElementById('param1')) params.push(document.getElementById('param1').value);
+    if (document.getElementById('param2')) params.push(document.getElementById('param2').value);
+    if (document.getElementById('param3')) params.push(document.getElementById('param3').value);
     
     const startDate = document.getElementById('startDate').value;
     const endDate = document.getElementById('endDate').value;
     const token = localStorage.getItem('jwt_token');
     
     resetDashboardState();
+    // Встановлюємо флаг, що це ручний запуск (ШІ має бути критичним)
+    isCurrentTaskOptimized = false;
     
     document.getElementById('idleState').classList.add('hidden');
     document.getElementById('processingState').classList.remove('hidden');
-    document.getElementById('startBtn').disabled = true;
+    
+    document.getElementById('processingTitle').innerText = 'Обчислення в C++';
+    document.getElementById('processingDesc').innerText = 'Синхронізація через SSE...';
+    
+    const startBtn = document.getElementById('startBtn');
+    const optBtn = document.getElementById('optimizeBtn');
+    if (startBtn) startBtn.disabled = true;
+    if (optBtn) optBtn.disabled = true;
 
     try {
         const response = await fetch('/api/analysis/start', {
@@ -530,22 +655,74 @@ async function startAnalysis() {
         const data = await response.json();
         
         if (!response.ok) {
-            if (response.status === 403) {
-                alert(`🛑 Обмеження доступу:\n\n${data.error}`);
-            } else {
-                throw new Error(data.error);
-            }
-            
+            if (response.status === 403) alert(`🛑 Обмеження доступу:\n\n${data.error}`);
+            else throw new Error(data.error);
             resetDashboardState();
-            document.getElementById('startBtn').disabled = false;
+            if (startBtn) startBtn.disabled = false;
+            if (optBtn) optBtn.disabled = false;
             return;
         }
         
         currentTaskId = data.task_id;
-        document.getElementById('taskIdDisplay').innerText = `ID: ${currentTaskId}`;
+        const taskIdDisplay = document.getElementById('taskIdDisplay');
+        if (taskIdDisplay) taskIdDisplay.innerText = `ID: ${currentTaskId}`;
     } catch (error) {
         alert(`Помилка: ${error.message}`);
         resetDashboardState();
-        document.getElementById('startBtn').disabled = false;
+        if (startBtn) startBtn.disabled = false;
+        if (optBtn) optBtn.disabled = false;
+    }
+}
+
+async function startOptimization() {
+    const pair = document.getElementById('pair').value;
+    const timeframe = document.getElementById('timeframe').value;
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const token = localStorage.getItem('jwt_token');
+    
+    resetDashboardState();
+    // Встановлюємо флаг, що це результат роботи ШІ-підбору (щоб Gemini його не "сварив")
+    isCurrentTaskOptimized = true;
+    
+    document.getElementById('idleState').classList.add('hidden');
+    document.getElementById('processingState').classList.remove('hidden');
+    
+    document.getElementById('processingTitle').innerHTML = '<span class="text-purple-400">🧬 Еволюційна Оптимізація</span>';
+    document.getElementById('processingDesc').innerText = 'Перебір тисяч комбінацій параметрів...';
+    
+    const startBtn = document.getElementById('startBtn');
+    const optBtn = document.getElementById('optimizeBtn');
+    if (startBtn) startBtn.disabled = true;
+    if (optBtn) optBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/analysis/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            // Передаємо ключове слово OPTIMIZE як стратегію
+            body: JSON.stringify({ pair, timeframe, strategy: 'OPTIMIZE', params: [], startDate, endDate })
+        });
+        
+        if (response.status === 401) { logout(); return; }
+        const data = await response.json();
+        
+        if (!response.ok) {
+            if (response.status === 403) alert(`🛑 Обмеження доступу:\n\n${data.error}`);
+            else throw new Error(data.error);
+            resetDashboardState();
+            if (startBtn) startBtn.disabled = false;
+            if (optBtn) optBtn.disabled = false;
+            return;
+        }
+        
+        currentTaskId = data.task_id;
+        const taskIdDisplay = document.getElementById('taskIdDisplay');
+        if (taskIdDisplay) taskIdDisplay.innerText = `ID: ${currentTaskId}`;
+    } catch (error) {
+        alert(`Помилка: ${error.message}`);
+        resetDashboardState();
+        if (startBtn) startBtn.disabled = false;
+        if (optBtn) optBtn.disabled = false;
     }
 }
