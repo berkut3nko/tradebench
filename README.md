@@ -1,4 +1,9 @@
 # Fast setup
+```bash
+docker compose start
+docker compose exec cpp-engine bash
+./build/tradebench_core
+```
 ## Run compose
 ```bash
 docker compose build cpp-engine
@@ -37,4 +42,11 @@ docker, postgres, doxygen, git, nginx, protoc
 ## Restart backend
 ```bash
 docker compose restart php-app
+```
+docker compose exec db psql -U user -d analyzer_db -c "SELECT id FROM analysis_results;"
+
+
+Перевірити сроки закінчення підписки у користувачів:
+```bash
+docker compose exec db psql -U user -d analyzer_db -c "SELECT id, pro_expires_at FROM users;"
 ```

@@ -15,7 +15,9 @@
 
     <nav class="bg-gray-800 border-b border-gray-700 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
         <div class="flex items-center gap-4">
-            <h1 class="text-2xl font-bold text-red-500">TradeBench <span class="text-gray-300 text-lg">Admin</span></h1>
+            <a href="index.html" class="flex items-center gap-4 hover:opacity-80 transition cursor-pointer">
+                <h1 class="text-2xl font-bold text-red-500">TradeBench <span class="text-gray-300 text-lg">Admin</span></h1>
+            </a>
             <span class="bg-red-500/20 text-red-400 border border-red-500/50 px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider">Superuser</span>
         </div>
         <div class="flex gap-4">

@@ -43,7 +43,9 @@
         
         <header class="flex justify-between items-center mb-10 border-b border-gray-800 pb-4">
             <div class="flex items-center gap-4">
-                <h1 class="text-3xl font-bold text-blue-500">TradeBench <span class="text-gray-500 text-lg">Control Center</span></h1>
+                <a href="index.html" class="flex items-center gap-4 hover:opacity-80 transition cursor-pointer">
+                    <h1 class="text-3xl font-bold text-blue-500">TradeBench <span class="text-gray-500 text-lg">Control Center</span></h1>
+                </a>
                 <span id="roleBadge" class="hidden px-3 py-1 rounded text-xs font-bold uppercase tracking-wider"></span>
             </div>
             <div class="flex items-center gap-4">

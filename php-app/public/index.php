@@ -11,6 +11,7 @@ use App\Controllers\AuthController;
 use App\Controllers\AnalysisController;
 use App\Controllers\AdminController;
 use App\Controllers\AiController;
+use App\Controllers\SubscriptionController; // ДОДАНО
 
 /* ---------------------------------------------------------
  * CORE SETTINGS & CORS
@@ -56,6 +57,9 @@ try {
 
     // AI Module
     $router->add('POST', '/api/ai/analyze-result', [AiController::class, 'analyzeResult']);
+
+    // Subscription Module (ДОДАНО)
+    $router->add('POST', '/api/subscription/upgrade', [SubscriptionController::class, 'upgrade']);
 
     // Admin Module
     $router->add('GET', '/api/admin/users', [AdminController::class, 'getUsers']);

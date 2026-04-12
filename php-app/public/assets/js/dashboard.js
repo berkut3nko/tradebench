@@ -1,7 +1,7 @@
 let equityChartInstance = null;
 let currentTaskId = null;
 let displayedTaskId = null;
-let isCurrentTaskOptimized = false; // Зберігає контекст походження графіка для ШІ
+let isCurrentTaskOptimized = false; 
 
 document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -231,8 +231,7 @@ async function loadHistory() {
             let wrText = resultData && resultData.win_rate !== undefined ? `${resultData.win_rate.toFixed(1)}%` : '-';
             let tfBadge = resultData && resultData.timeframe ? `<span class="text-gray-500 mr-1">[${resultData.timeframe}]</span>` : '';
             
-            // ВАЖЛИВО: Візуальні індикатори Генетики та ШІ
-            let isOptBadge = resultData && resultData.is_optimized ? `<span title="Знадено Генетичним Автопідбором" class="text-purple-400 ml-2 cursor-help">🧬</span>` : '';
+            let isOptBadge = resultData && resultData.is_optimized ? `<span title="Знайдено Генетичним Автопідбором" class="text-purple-400 ml-2 cursor-help">🧬</span>` : '';
             let hasAiBadge = resultData && resultData.ai_insight ? `<span title="Наявний висновок ШІ" class="text-blue-400 ml-1 cursor-help">✨</span>` : '';
             
             let strategyName = tfBadge + formatStrategyName(resultData ? resultData.strategy : null) + isOptBadge + hasAiBadge;
@@ -240,17 +239,38 @@ async function loadHistory() {
             let date = new Date(task.created_at).toLocaleString('uk-UA');
             let safeJson = resultData ? task.result_data.replace(/'/g, "&#39;") : '';
             
-            let actionBtn = `
-                <div class="flex justify-end gap-3 items-center">
-                    ${resultData ? `<button onclick='viewHistoricalChart(this, "${task.task_id}")' data-result='${safeJson}' class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow">Графік</button>` : ''}
-                    <button onclick='deleteBacktest("${task.task_id}")' class="text-red-400 hover:text-red-300 transition p-1" title="Видалити бектест">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    </button>
-                </div>
-            `;
+            // ВАЖЛИВО: Визначаємо чи це зараз відкритий графік
+            let isActive = (task.task_id === displayedTaskId);
+            
+            let actionBtn = '';
+            if (isActive) {
+                // Виділення замість кнопки для активного
+                actionBtn = `
+                    <div class="flex justify-end gap-3 items-center">
+                        <span class="text-blue-400 font-bold text-xs bg-blue-900/30 px-3 py-1 rounded border border-blue-500 shadow shadow-blue-900/50">Переглядається</span>
+                        <button onclick='deleteBacktest("${task.task_id}")' class="text-red-400 hover:text-red-300 transition p-1" title="Видалити бектест">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                `;
+            } else {
+                // Звичайна кнопка "Відкрити" для інших
+                actionBtn = `
+                    <div class="flex justify-end gap-3 items-center">
+                        ${resultData ? `<button onclick='viewHistoricalChart(this, "${task.task_id}")' data-result='${safeJson}' class="bg-gray-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs font-bold transition shadow border border-gray-600 hover:border-blue-500">Відкрити</button>` : ''}
+                        <button onclick='deleteBacktest("${task.task_id}")' class="text-red-400 hover:text-red-300 transition p-1" title="Видалити бектест">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                `;
+            }
+
+            let rowClasses = isActive 
+                ? "bg-gray-800/90 border-l-4 border-blue-500 shadow-md" 
+                : "hover:bg-gray-750 border-l-4 border-transparent transition-colors";
 
             tbody.innerHTML += `
-                <tr class="hover:bg-gray-750 transition-colors">
+                <tr class="${rowClasses}">
                     <td class="px-4 py-3 text-gray-300">${date}</td>
                     <td class="px-4 py-3 font-bold text-white">${task.pair}</td>
                     <td class="px-4 py-3 font-mono text-xs text-gray-300 flex items-center">${strategyName}</td>
@@ -322,6 +342,9 @@ window.viewHistoricalChart = function(btn, taskId) {
             aiResponse.innerHTML = resultData.ai_insight.replace(/\n/g, '<br>');
         }
     }
+    
+    // ВАЖЛИВО: Оновлюємо таблицю, щоб відобразити статус "Переглядається"
+    loadHistory();
     
     window.scrollTo({ top: 0, behavior: 'smooth' });
 };
@@ -597,7 +620,6 @@ async function askAI() {
         const response = await fetch('/api/ai/analyze-result', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            // Передаємо контекст, чи був цей графік результатом оптимізації
             body: JSON.stringify({ task_id: displayedTaskId, is_optimized: isCurrentTaskOptimized })
         });
         
@@ -610,6 +632,9 @@ async function askAI() {
             responseBox.classList.remove('hidden');
             responseBox.innerHTML = data.insight.replace(/\n/g, '<br>');
         }
+        
+        // ВАЖЛИВО: Одразу оновлюємо таблицю історії, щоб додати значок ✨
+        loadHistory();
         
     } catch (error) {
         if (loader) loader.classList.add('hidden');
@@ -647,7 +672,6 @@ async function startAnalysis() {
     const token = localStorage.getItem('jwt_token');
     
     resetDashboardState();
-    // Встановлюємо флаг, що це ручний запуск (ШІ має бути критичним)
     isCurrentTaskOptimized = false;
     
     document.getElementById('idleState').classList.add('hidden');
@@ -699,7 +723,6 @@ async function startOptimization() {
     const token = localStorage.getItem('jwt_token');
     
     resetDashboardState();
-    // Встановлюємо флаг, що це результат роботи ШІ-підбору (щоб Gemini його не "сварив")
     isCurrentTaskOptimized = true;
     
     document.getElementById('idleState').classList.add('hidden');
@@ -717,7 +740,6 @@ async function startOptimization() {
         const response = await fetch('/api/analysis/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            // Передаємо ключове слово OPTIMIZE як стратегію
             body: JSON.stringify({ pair, timeframe, strategy: 'OPTIMIZE', params: [], startDate, endDate })
         });
         

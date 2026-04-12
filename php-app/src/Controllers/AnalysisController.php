@@ -36,12 +36,17 @@ class AnalysisController {
         
         $daysRequested = ($endTimestamp - $startTimestamp) / 86400;
         
+        $strategy = $input['strategy'] ?? 'SMA_CROSS';
+
         if ($userRole !== 'pro' && $userRole !== 'admin') {
             if ($daysRequested > 30) {
                 Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
             }
             if ($timeframe !== '1h') {
                 Response::error("Custom timeframes are available only for PRO accounts.", 403);
+            }
+            if ($strategy === 'OPTIMIZE') {
+                Response::error("Генетичний автопідбір доступний лише для користувачів з підпискою PRO.", 403);
             }
         }
 
@@ -84,12 +89,9 @@ class AnalysisController {
             if ($this->db->inTransaction()) $this->db->rollBack();
         }
         
-        $strategy = $input['strategy'] ?? 'SMA_CROSS';
         $params = $input['params'] ?? [];
-        
         $strategyPayload = $strategy;
         
-        /* Якщо це не оптимізація, додаємо параметри. Інакше залишаємо просто "OPTIMIZE" */
         if ($strategy !== 'OPTIMIZE') {
             foreach ($params as $param) {
                 $strategyPayload .= ":" . floatval($param);
@@ -108,7 +110,11 @@ class AnalysisController {
         ], $timeframe);
 
         if (!$grpcResult['success']) {
-            Response::error("gRPC Engine Error: " . ($grpcResult['error'] ?? 'Unknown'), 500);
+            $errorDetails = $grpcResult['error'] ?? 'Unknown';
+            if (strpos($errorDetails, 'failed to connect') !== false || strpos($errorDetails, 'Connection refused') !== false) {
+                Response::error("Обчислювальне ядро (C++) наразі недоступне. Будь ласка, перевірте, чи запущено сервер аналітики.", 503);
+            }
+            Response::error("Помилка обчислювального ядра: " . $errorDetails, 500);
         }
 
         Response::json(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started"], 202);

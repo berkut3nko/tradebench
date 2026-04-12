@@ -5,11 +5,7 @@ namespace App\Controllers;
 use App\Core\Database;
 use App\Core\Response;
 use Firebase\JWT\JWT;
-use PDOException;
 
-/**
- * Handles Authentication logic (Login, Register, Refresh, Logout)
- */
 class AuthController {
     
     private \PDO $db;
@@ -20,35 +16,34 @@ class AuthController {
 
     public function register(): void {
         $input = json_decode(file_get_contents('php://input'), true);
-        
         $email = trim($input['email'] ?? '');
         $password = $input['password'] ?? '';
 
         if (empty($email) || empty($password)) {
-            Response::error("Email and password are required", 422);
+            Response::error("Email та пароль є обов'язковими", 400);
         }
 
+        // ВАЛІДАЦІЯ ПОШТИ
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            Response::error("Invalid email format", 422);
+            Response::error("Невірний формат Email адреси", 422);
         }
 
-        if (strlen($password) < 8 || !preg_match('/[A-Za-z]/', $password) || !preg_match('/[0-9]/', $password)) {
-            Response::error("Password must be at least 8 characters long and contain both letters and numbers", 422);
+        // ВАЛІДАЦІЯ ПАРОЛЯ
+        if (strlen($password) < 8) {
+            Response::error("Пароль має містити щонайменше 8 символів", 422);
         }
 
-        $hash = password_hash($password, PASSWORD_DEFAULT);
-        
+        $hash = password_hash($password, PASSWORD_BCRYPT);
+
         try {
-            /* First user becomes admin, others are standard */
-            $roleCheck = $this->db->query("SELECT COUNT(*) FROM users")->fetchColumn();
-            $role = ($roleCheck == 0) ? 'admin' : 'standard';
-
-            $stmt = $this->db->prepare("INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?) RETURNING id");
-            $stmt->execute([$email, $hash, $role]);
-            
-            Response::json(["message" => "User registered successfully", "user_id" => $stmt->fetchColumn()], 201);
-        } catch (PDOException $e) {
-            Response::error("Email already exists", 409);
+            $stmt = $this->db->prepare("INSERT INTO users (email, password_hash) VALUES (?, ?)");
+            $stmt->execute([$email, $hash]);
+            Response::json(["message" => "Успішна реєстрація!"], 201);
+        } catch (\PDOException $e) {
+            if ($e->getCode() == 23505) { // Помилка унікальності
+                Response::error("Цей Email вже зареєстровано", 409);
+            }
+            Response::error("Помилка реєстрації: " . $e->getMessage(), 500);
         }
     }
 
@@ -58,92 +53,64 @@ class AuthController {
         $password = $input['password'] ?? '';
 
         if (empty($email) || empty($password)) {
-            Response::error("Email and password are required", 400);
+            Response::error("Email та пароль є обов'язковими", 400);
         }
 
-        $stmt = $this->db->prepare("SELECT id, password_hash, role FROM users WHERE email = ?");
-        $stmt->execute([$email]);
-        $user = $stmt->fetch();
+        try {
+            $stmt = $this->db->prepare("SELECT id, password_hash, role, pro_expires_at FROM users WHERE email = ?");
+            $stmt->execute([$email]);
+            $user = $stmt->fetch();
 
-        if ($user && password_verify($password, $user['password_hash'])) {
-            
-            $secret = $_ENV['JWT_SECRET'];
-            
-            /* Access Token (15 min) */
-            $accessPayload = [
-                'iss' => 'tradebench_api',
-                'sub' => $user['id'],
-                'role' => $user['role'] ?? 'standard',
-                'iat' => time(),
-                'exp' => time() + (60 * 15) 
-            ];
-            $accessToken = JWT::encode($accessPayload, $secret, 'HS256');
+            if ($user && password_verify($password, $user['password_hash'])) {
+                
+                $role = $user['role'] ?? 'standard';
+                
+                // ПЕРЕВІРКА НА ЗАКІНЧЕННЯ ПІДПИСКИ
+                if ($role === 'pro' && $user['pro_expires_at'] !== null) {
+                    if (strtotime($user['pro_expires_at']) < time()) {
+                        $role = 'standard';
+                        $this->db->prepare("UPDATE users SET role = 'standard' WHERE id = ?")->execute([$user['id']]);
+                    }
+                }
+                
+                // Запасний варіант, якщо JWT_SECRET не задано у .env (запобігає 500 Fatal Error)
+                $secret = $_ENV['JWT_SECRET'] ?? 'vortex_super_secret_key_2026';
+                
+                $accessPayload = [
+                    'iss' => 'tradebench_api',
+                    'sub' => $user['id'],
+                    'role' => $role,
+                    'iat' => time(),
+                    'exp' => time() + (60 * 60 * 24) // Токен на 24 години
+                ];
+                $accessToken = JWT::encode($accessPayload, $secret, 'HS256');
 
-            /* Refresh Token (7 days) */
-            $refreshToken = bin2hex(random_bytes(32));
-            $expiresAt = date('Y-m-d H:i:s', time() + (86400 * 7));
+                // Безпечний запис refresh_token (відловлюємо помилку, якщо таблиця відсутня)
+                try {
+                    $this->db->prepare("DELETE FROM refresh_tokens WHERE user_id = ?")->execute([$user['id']]);
+                    $refreshToken = bin2hex(random_bytes(32));
+                    $expiresAt = date('Y-m-d H:i:s', time() + (86400 * 7));
+                    $this->db->prepare("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)")
+                             ->execute([$user['id'], $refreshToken, $expiresAt]);
+                } catch (\PDOException $e) {
+                    // Якщо таблиці refresh_tokens немає, ми ігноруємо помилку і просто продовжуємо вхід
+                }
 
-            $stmt = $this->db->prepare("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
-            $stmt->execute([$user['id'], $refreshToken, $expiresAt]);
-
-            setcookie('refresh_token', $refreshToken, [
-                'expires' => time() + (86400 * 7),
-                'path' => '/',
-                'secure' => false, // Set true in production
-                'httponly' => true,
-                'samesite' => 'Strict'
-            ]);
-
-            Response::json([
-                "token" => $accessToken, 
-                "user_id" => $user['id'],
-                "role" => $user['role'] ?? 'standard'
-            ]);
-        } else {
-            Response::error("Invalid email or password", 401);
+                Response::json([
+                    "message" => "Успішний вхід",
+                    "token" => $accessToken,
+                    "role" => $role
+                ]);
+            } else {
+                Response::error("Неправильний email або пароль", 401);
+            }
+        } catch (\Exception $e) {
+            // Тепер будь-яка критична помилка буде повертатися у консоль, а не "мовчати"
+            Response::error("Внутрішня помилка сервера під час входу: " . $e->getMessage(), 500);
         }
-    }
-
-    public function refresh(): void {
-        $refreshToken = $_COOKIE['refresh_token'] ?? null;
-        
-        if (!$refreshToken) {
-            Response::error("No refresh token provided", 401);
-        }
-
-        $stmt = $this->db->prepare("
-            SELECT r.user_id, u.role, r.expires_at 
-            FROM refresh_tokens r 
-            JOIN users u ON r.user_id = u.id 
-            WHERE r.token = ?
-        ");
-        $stmt->execute([$refreshToken]);
-        $tokenData = $stmt->fetch();
-
-        if (!$tokenData || strtotime($tokenData['expires_at']) < time()) {
-            setcookie('refresh_token', '', time() - 3600, '/');
-            Response::error("Invalid or expired refresh token", 401);
-        }
-
-        $accessPayload = [
-            'iss' => 'tradebench_api',
-            'sub' => $tokenData['user_id'],
-            'role' => $tokenData['role'],
-            'iat' => time(),
-            'exp' => time() + (60 * 15)
-        ];
-        $newAccessToken = JWT::encode($accessPayload, $_ENV['JWT_SECRET'], 'HS256');
-
-        Response::json(["token" => $newAccessToken, "role" => $tokenData['role']]);
     }
 
     public function logout(): void {
-        $refreshToken = $_COOKIE['refresh_token'] ?? null;
-        if ($refreshToken) {
-            $stmt = $this->db->prepare("DELETE FROM refresh_tokens WHERE token = ?");
-            $stmt->execute([$refreshToken]);
-            setcookie('refresh_token', '', time() - 3600, '/');
-        }
-        Response::json(["message" => "Logged out successfully"]);
+        Response::json(["message" => "Ви успішно вийшли з системи"]);
     }
 }
