@@ -44,19 +44,17 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($uriPath === '/' || $uriPath === '/landing') {
             header('Content-Type: text/html');
-            /* Fallback to index.html if landing.php does not exist */
-            $file = file_exists(__DIR__ . '/landing.php') ? '/landing.php' : '/index.html';
-            require_once __DIR__ . $file;
+            require_once __DIR__ . '/landing.html';
             exit;
         }
         if ($uriPath === '/dashboard') {
             header('Content-Type: text/html');
-            require_once __DIR__ . '/dashboard.php';
+            require_once __DIR__ . '/dashboard.html';
             exit;
         }
         if ($uriPath === '/admin') {
             header('Content-Type: text/html');
-            require_once __DIR__ . '/admin.php';
+            require_once __DIR__ . '/admin.html';
             exit;
         }
     }
