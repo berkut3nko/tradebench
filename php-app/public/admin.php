@@ -15,13 +15,13 @@
 
     <nav class="bg-gray-800 border-b border-gray-700 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
         <div class="flex items-center gap-4">
-            <a href="index.html" class="flex items-center gap-4 hover:opacity-80 transition cursor-pointer">
+            <a href="/" class="flex items-center gap-4 hover:opacity-80 transition cursor-pointer">
                 <h1 class="text-2xl font-bold text-red-500">TradeBench <span class="text-gray-300 text-lg">Admin</span></h1>
             </a>
             <span class="bg-red-500/20 text-red-400 border border-red-500/50 px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider">Superuser</span>
         </div>
         <div class="flex gap-4">
-            <button onclick="window.location.href='dashboard.php'" class="text-sm bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition flex items-center gap-2">
+            <button onclick="window.location.href='dashboard'" class="text-sm bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition flex items-center gap-2">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                 Повернутись до застосунку
             </button>

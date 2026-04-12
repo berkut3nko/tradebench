@@ -11,7 +11,7 @@ use App\Controllers\AuthController;
 use App\Controllers\AnalysisController;
 use App\Controllers\AdminController;
 use App\Controllers\AiController;
-use App\Controllers\SubscriptionController; // ДОДАНО
+use App\Controllers\SubscriptionController;
 
 /* ---------------------------------------------------------
  * CORE SETTINGS & CORS
@@ -35,33 +35,58 @@ try {
     $dotenv = Dotenv::createImmutable(__DIR__ . '/../');
     $dotenv->load();
 
-    /* Initialize MVC Router */
+    /* =========================================
+     * UI ROUTES (Pages)
+     * Intercept page requests before the API router
+     * ========================================= */
+    $uriPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        if ($uriPath === '/' || $uriPath === '/landing') {
+            header('Content-Type: text/html');
+            /* Fallback to index.html if landing.php does not exist */
+            $file = file_exists(__DIR__ . '/landing.php') ? '/landing.php' : '/index.html';
+            require_once __DIR__ . $file;
+            exit;
+        }
+        if ($uriPath === '/dashboard') {
+            header('Content-Type: text/html');
+            require_once __DIR__ . '/dashboard.php';
+            exit;
+        }
+        if ($uriPath === '/admin') {
+            header('Content-Type: text/html');
+            require_once __DIR__ . '/admin.php';
+            exit;
+        }
+    }
+
+    /* Initialize MVC Router for API */
     $router = new Router();
 
     /* =========================================
-     * REGISTER ROUTES
+     * API ROUTES
      * ========================================= */
     
-    // Auth Module
+    /* Auth Module */
     $router->add('POST', '/api/auth/register', [AuthController::class, 'register']);
     $router->add('POST', '/api/auth/login', [AuthController::class, 'login']);
     $router->add('POST', '/api/auth/refresh', [AuthController::class, 'refresh']);
     $router->add('POST', '/api/auth/logout', [AuthController::class, 'logout']);
 
-    // Analysis Module
+    /* Analysis Module */
     $router->add('POST', '/api/analysis/start', [AnalysisController::class, 'start']);
     $router->add('GET', '/api/analysis/history', [AnalysisController::class, 'history']);
-    // NEW: Маршрут для видалення бектесту
     $router->add('DELETE', '/api/analysis/history/{id}', [AnalysisController::class, 'deleteHistory']);
     $router->add('GET', '/api/analysis/stream', [AnalysisController::class, 'stream']);
 
-    // AI Module
+    /* AI Module */
     $router->add('POST', '/api/ai/analyze-result', [AiController::class, 'analyzeResult']);
 
-    // Subscription Module (ДОДАНО)
+    /* Subscription Module */
     $router->add('POST', '/api/subscription/upgrade', [SubscriptionController::class, 'upgrade']);
 
-    // Admin Module
+    /* Admin Module */
     $router->add('GET', '/api/admin/users', [AdminController::class, 'getUsers']);
     $router->add('PUT', '/api/admin/users/{id}', [AdminController::class, 'updateUser']);
     $router->add('DELETE', '/api/admin/users/{id}', [AdminController::class, 'deleteUser']);
@@ -71,12 +96,11 @@ try {
      * DISPATCH REQUEST
      * ========================================= */
     $method = $_SERVER['REQUEST_METHOD'];
-    $uri = $_SERVER['REQUEST_URI'];
     
-    $router->dispatch($method, $uri);
+    $router->dispatch($method, $uriPath);
 
 } catch (\Throwable $e) {
-    /* Global Error Handler - Fail-safe */
+    /* Global Error Handler */
     http_response_code(500);
     echo json_encode([
         "error" => "System Error",

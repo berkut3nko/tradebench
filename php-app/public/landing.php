@@ -1,3 +1,6 @@
+<?php
+// MVC View: User Landing Page
+?>
 <!DOCTYPE html>
 <html lang="uk" class="scroll-smooth">
 <head>
@@ -40,7 +43,7 @@
             </div>
             <div class="flex gap-4 items-center">
                 <a href="#pricing" class="text-gray-300 hover:text-white text-sm font-medium transition hidden sm:block">Тарифи</a>
-                <a id="navActionBtn" href="dashboard.php" class="bg-white text-gray-900 hover:bg-gray-200 font-bold py-2 px-6 rounded-full transition shadow-lg shadow-white/10">
+                <a id="navActionBtn" href="dashboard" class="bg-white text-gray-900 hover:bg-gray-200 font-bold py-2 px-6 rounded-full transition shadow-lg shadow-white/10">
                     Увійти в платформу
                 </a>
             </div>
@@ -69,7 +72,7 @@
             </p>
             
             <div class="flex flex-col sm:flex-row justify-center gap-4">
-                <a href="dashboard.php" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-lg py-4 px-8 rounded-lg transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2">
+                <a href="dashboard" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-lg py-4 px-8 rounded-lg transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2">
                     Розпочати аналіз
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
                 </a>
@@ -229,7 +232,7 @@
             
             // Якщо не авторизований - кидаємо на вхід
             if (!token) {
-                window.location.href = 'dashboard.php';
+                window.location.href = 'dashboard';
                 return;
             }
 
