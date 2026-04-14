@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(TradeBenchCore LANGUAGES CXX)
 
-# CRITICAL FIX: Downgrade from C++20 to C++17
-# Ubuntu's libpqxx-dev package is compiled with C++17. 
-# Using C++20 causes an ABI mismatch with std::source_location.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
