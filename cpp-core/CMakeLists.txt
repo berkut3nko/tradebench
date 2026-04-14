@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(TradeBenchCore LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+# CRITICAL FIX: Downgrade from C++20 to C++17
+# Ubuntu's libpqxx-dev package is compiled with C++17. 
+# Using C++20 causes an ABI mismatch with std::source_location.
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROTO_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/proto")
@@ -11,7 +14,6 @@ file(MAKE_DIRECTORY ${PROTO_SRC_DIR})
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 
-# Use pkg-config to automatically resolve ALL complex dependencies and Abseil flags
 pkg_check_modules(pqxx REQUIRED libpqxx)
 pkg_check_modules(hiredis REQUIRED hiredis)
 pkg_check_modules(grpc REQUIRED grpc++)
