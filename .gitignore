@@ -10,6 +10,8 @@ php-app/vendor/
 php-app/.composer/
 php-app/composer.lock
 .php-cs-fixer.cache
+# PHPUnit cache
+.phpunit.cache/
 
 #C++ / CMake
 

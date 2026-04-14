@@ -6,27 +6,29 @@ use PHPUnit\Framework\TestCase;
 use App\Services\AiService;
 use Exception;
 
+/**
+ * @brief Unit test suite for the AiService class.
+ */
 class AiServiceTest extends TestCase
 {
     /**
      * @brief Tests if the AI service correctly handles a missing API key.
+     * @throws Exception Expected to be thrown due to missing configuration.
+     * @return void
      */
     public function testGenerateInsightThrowsExceptionWithoutApiKey(): void
     {
-        // Temporarily remove the API key
         $originalKey = $_ENV['GEMINI_API_KEY'] ?? null;
         unset($_ENV['GEMINI_API_KEY']);
         
         $service = new AiService();
 
-        // We expect the service to throw this specific exception
         $this->expectException(Exception::class);
-        $this->expectExceptionMessage("API ключ для ШІ не налаштовано на сервері.");
+        $this->expectExceptionMessage("AI API key is missing from server configuration.");
         
         try {
             $service->generateInsight("Analyze this data");
         } finally {
-            // Restore key
             if ($originalKey !== null) {
                 $_ENV['GEMINI_API_KEY'] = $originalKey;
             }
