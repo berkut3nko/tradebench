@@ -7,15 +7,15 @@ use Firebase\JWT\Key;
 use Firebase\JWT\ExpiredException;
 
 /**
- * Handles JWT verification and role checks
+ * @brief Handles JWT verification and Role-Based Access Control (RBAC).
  */
 class AuthMiddleware {
     
     /**
-     * Authenticate request using Bearer token or Query param
-     * * @param string|null $tokenFromQuery
-     * @param string|null $requiredRole
-     * @return array User data ['id', 'role']
+     * @brief Authenticates a request using a Bearer token or Query parameter.
+     * @param string|null $tokenFromQuery Optional token provided via URL parameters (for SSE).
+     * @param string|null $requiredRole The minimum role required to proceed (e.g., 'admin', 'pro').
+     * @return array Associative array containing the authenticated user's ID and role.
      */
     public static function authenticate(?string $tokenFromQuery = null, ?string $requiredRole = null): array {
         $headers = function_exists('getallheaders') ? getallheaders() : [];
@@ -38,11 +38,12 @@ class AuthMiddleware {
         } catch (ExpiredException $e) {
             Response::error("Unauthorized: Token expired", 401, "TOKEN_EXPIRED");
         } catch (\Exception $e) {
-            // Тепер цей блок перехоплює лише помилки декодування JWT
+            // This catch block isolates token decoding failures
             Response::error("Unauthorized: Invalid token", 401);
         }
 
-        // ВАЖЛИВО: Перевірка ролей винесена за межі try-catch
+        // IMPORTANT: Role evaluation is moved outside the try-catch block 
+        // to prevent overriding access-denied exceptions
         $role = $decoded->role ?? 'standard';
         
         if ($requiredRole && $role !== $requiredRole && $role !== 'admin') {

@@ -7,12 +7,14 @@ use Analyzer\AnalysisRequest;
 use Grpc\ChannelCredentials;
 
 /**
- * @brief Client for interacting with the C++ Analytical Core.
+ * @brief Client for interacting with the C++ Analytical Core via gRPC.
  */
 class AnalysisClient {
+    /** @var AnalysisServiceClient The underlying gRPC client instance. */
     private AnalysisServiceClient $client;
 
     /**
+     * @brief Constructs the AnalysisClient and establishes an insecure channel.
      * @param string $hostname The address of the C++ gRPC server.
      */
     public function __construct(string $hostname = 'cpp-engine:50051') {
@@ -22,14 +24,14 @@ class AnalysisClient {
     }
 
     /**
-     * @brief Sends a backtesting request to the core with dynamic parameters.
-     * @param string $userId
-     * @param string $pair
-     * @param string $strategy
-     * @param string $taskId
-     * @param array $dateRange Associative array with 'start' and 'end' timestamps
-     * @param string $timeframe The trading timeframe (e.g., '1h', '15m')
-     * @return array
+     * @brief Sends an asynchronous backtesting request to the C++ core.
+     * @param string $userId The ID of the user requesting the analysis.
+     * @param string $pair The trading pair (e.g., BTCUSDT).
+     * @param string $strategy The strategy configuration payload.
+     * @param string $taskId Unique identifier for the analysis task.
+     * @param array $dateRange Associative array with 'start' and 'end' UNIX timestamps.
+     * @param string $timeframe The trading timeframe (e.g., '1h', '15m').
+     * @return array Associative array containing the success status and message/error.
      */
     public function requestAnalysis(string $userId, string $pair, string $strategy, string $taskId, array $dateRange = [], string $timeframe = '1h'): array {
         $request = new AnalysisRequest();
@@ -46,7 +48,7 @@ class AnalysisClient {
         $request->setTaskId($taskId);
         $request->setTimeframe($timeframe);
 
-        // Added a timeout of 5 seconds (5,000,000 microseconds) to prevent PHP from hanging
+        // Implemented a timeout of 5 seconds (5,000,000 microseconds) to prevent PHP worker thread exhaustion
         list($response, $status) = $this->client->StartAnalysis($request, [], ['timeout' => 5000000])->wait();
 
         if ($status->code !== 0) {

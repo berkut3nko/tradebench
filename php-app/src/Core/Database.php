@@ -6,13 +6,15 @@ use PDO;
 use PDOException;
 
 /**
- * Singleton Database Connection Manager
+ * @brief Singleton Database Connection Manager for PostgreSQL.
  */
 class Database {
+    /** @var PDO|null The single PDO instance used across the application. */
     private static ?PDO $instance = null;
 
     /**
-     * Get the PDO connection instance
+     * @brief Retrieves the active PDO connection instance or establishes a new one.
+     * @return PDO The active database connection.
      */
     public static function getConnection(): PDO {
         if (self::$instance === null) {
@@ -39,7 +41,8 @@ class Database {
     }
 
     /**
-     * Ensure required dynamic tables exist
+     * @brief Ensures that necessary dynamic tables exist upon connection.
+     * @param PDO $pdo The active PDO instance.
      */
     private static function runMigrations(PDO $pdo): void {
         $pdo->exec("

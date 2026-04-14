@@ -6,6 +6,9 @@ use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
 
+/**
+ * @brief Controller managing administrative routes and data moderation tools.
+ */
 class AdminController {
     
     private \PDO $db;
@@ -15,14 +18,18 @@ class AdminController {
         AuthMiddleware::authenticate(null, 'admin');
     }
 
+    /**
+     * @brief Retrieves the entire user catalog securely.
+     */
     public function getUsers(): void {
         $stmt = $this->db->query("SELECT id, email, role, created_at FROM users ORDER BY id DESC");
         Response::json($stmt->fetchAll());
     }
 
-    /* ---------------------------------------------------------
-     * UPDATED: Full Cascade Deletion of User
-     * --------------------------------------------------------- */
+    /**
+     * @brief Facilitates cascade deletion of a user record and its associated history.
+     * @param string $id Target User ID parameter.
+     */
     public function deleteUser(string $id): void {
         $authData = AuthMiddleware::authenticate(null, 'admin');
         
@@ -33,24 +40,24 @@ class AdminController {
         try {
             $this->db->beginTransaction();
             
-            // 1. Видаляємо всі токени авторизації користувача
+            // 1. Delete all authorization tokens of the user
             $this->db->prepare("DELETE FROM refresh_tokens WHERE user_id = ?")->execute([$id]);
 
-            // 2. Знаходимо всі завдання (backtests) користувача
+            // 2. Find all tasks (backtests) of the user
             $tasksStmt = $this->db->prepare("SELECT id FROM analysis_tasks WHERE user_id = ?");
             $tasksStmt->execute([$id]);
             $tasks = $tasksStmt->fetchAll(\PDO::FETCH_COLUMN);
 
             if (!empty($tasks)) {
                 $placeholders = implode(',', array_fill(0, count($tasks), '?'));
-                // Видаляємо результати
+                // 3. Delete analysis results linked to tasks
                 $this->db->prepare("DELETE FROM analysis_results WHERE task_id IN ($placeholders)")->execute($tasks);
             }
 
-            // 3. Видаляємо самі завдання
+            // 4. Delete the analysis tasks proper
             $this->db->prepare("DELETE FROM analysis_tasks WHERE user_id = ?")->execute([$id]);
 
-            // 4. І нарешті видаляємо самого користувача
+            // 5. Finally, delete the user record
             $this->db->prepare("DELETE FROM users WHERE id = ?")->execute([$id]);
 
             $this->db->commit();
@@ -63,6 +70,10 @@ class AdminController {
         }
     }
 
+    /**
+     * @brief Updates internal role permissions associated with target User entity.
+     * @param string $id Database ID for the target user.
+     */
     public function updateUser(string $id): void {
         $authData = AuthMiddleware::authenticate(null, 'admin');
         
@@ -83,6 +94,9 @@ class AdminController {
         Response::json(["message" => "User role updated to " . strtoupper($newRole)]);
     }
 
+    /**
+     * @brief Computes generalized statistical counters for dashboard telemetry.
+     */
     public function getStats(): void {
         $usersCount = $this->db->query("SELECT COUNT(*) FROM users")->fetchColumn();
         $tasksCount = $this->db->query("SELECT COUNT(*) FROM analysis_tasks")->fetchColumn();

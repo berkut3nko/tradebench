@@ -5,25 +5,26 @@ namespace App\Services;
 use Exception;
 
 /**
- * Service responsible for communicating with Google Gemini API
+ * @brief Service responsible for managing communications with the Google Gemini Large Language Model.
  */
 class AiService {
     
     /**
-     * @param string $prompt The prompt to send to the AI
-     * @return string The AI's response text
-     * @throws Exception If the API request fails
+     * @brief Generates an analytical insight based on the provided prompt.
+     * @param string $prompt The formatted instructions to send to the AI.
+     * @return string The text payload response from the AI.
+     * @throws Exception If the API request fails, times out, or encounters safety blocks.
      */
     public function generateInsight(string $prompt): string {
         $apiKey = $_ENV['GEMINI_API_KEY'] ?? '';
         
         if (empty($apiKey)) {
-            throw new Exception("API ключ для ШІ не налаштовано на сервері.");
+            throw new Exception("AI API key is missing from server configuration.");
         }
 
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" . $apiKey;
 
-        // ВАЖЛИВО: Налаштування безпеки для обходу блокувань фінансового контенту
+        // IMPORTANT: Security settings to bypass strict financial content blocking algorithms
         $payload = [
             "contents" => [
                 [
@@ -55,15 +56,14 @@ class AiService {
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        // Покращене логування помилок
+        
+        // Advanced error logging and inspection
         if ($httpCode !== 200 || $response === false) {
-            $errorMsg = "Помилка зв'язку з сервером ШІ (Код: $httpCode).";
+            $errorMsg = "AI Server connection failed (HTTP Code: $httpCode).";
             if ($response) {
                 $errData = json_decode($response, true);
                 if (isset($errData['error']['message'])) {
-                    $errorMsg .= " Деталі від Google: " . $errData['error']['message'];
+                    $errorMsg .= " Google Details: " . $errData['error']['message'];
                 }
             }
             throw new Exception($errorMsg);
@@ -71,15 +71,15 @@ class AiService {
 
         $data = json_decode($response, true);
         
-        // Перевірка, чи не заблокував фільтр (Finish Reason)
+        // Inspect response payload to detect if Gemini halted execution due to internal safety algorithms
         if (isset($data['candidates'][0]['finishReason']) && $data['candidates'][0]['finishReason'] === 'SAFETY') {
-             throw new Exception("Google Gemini заблокував відповідь через свої внутрішні фільтри безпеки.");
+             throw new Exception("Google Gemini blocked the response due to its internal safety filters.");
         }
 
         if (isset($data['candidates'][0]['content']['parts'][0]['text'])) {
             return $data['candidates'][0]['content']['parts'][0]['text'];
         }
 
-        throw new Exception("Отримано порожню або нерозібрану відповідь від ШІ.");
+        throw new Exception("Received an empty or unparseable response from the AI.");
     }
 }

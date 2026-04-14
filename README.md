@@ -50,3 +50,7 @@ docker compose exec db psql -U user -d analyzer_db -c "SELECT id FROM analysis_r
 ```bash
 docker compose exec db psql -U user -d analyzer_db -c "SELECT id, pro_expires_at FROM users;"
 ```
+Зробити користувача з id = 1 адміністратором:
+```bash
+docker compose exec db psql -U user -d analyzer_db -c "UPDATE users SET role = 'admin' WHERE id = 1;"
+```

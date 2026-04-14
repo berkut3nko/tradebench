@@ -1,4 +1,9 @@
 <?php
+/**
+ * @brief Application Entry Point.
+ * Initializes environment configuration, core middleware, and dispatches HTTP requests.
+ */
+
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
@@ -14,7 +19,7 @@ use App\Controllers\AiController;
 use App\Controllers\SubscriptionController;
 
 /* ---------------------------------------------------------
- * CORE SETTINGS & CORS
+ * CORE SETTINGS & CORS CONFIGURATION
  * --------------------------------------------------------- */
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Credentials: true');
@@ -31,13 +36,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 try {
-    /* Load Environment Variables */
+    /* Initialize Environment Context */
     $dotenv = Dotenv::createImmutable(__DIR__ . '/../');
     $dotenv->load();
 
     /* =========================================
-     * UI ROUTES (Pages)
-     * Intercept page requests before the API router
+     * UI ROUTES (STATIC PAGES)
+     * Direct HTML rendering block bypassing API router
      * ========================================= */
     $uriPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
@@ -59,51 +64,51 @@ try {
         }
     }
 
-    /* Initialize MVC Router for API */
+    /* Compile Dynamic MVC Router Context */
     $router = new Router();
 
     /* =========================================
-     * API ROUTES
+     * APPLICATION API ROUTES
      * ========================================= */
     
-    /* Auth Module */
+    /* Security & Auth Module */
     $router->add('POST', '/api/auth/register', [AuthController::class, 'register']);
     $router->add('POST', '/api/auth/login', [AuthController::class, 'login']);
     $router->add('POST', '/api/auth/refresh', [AuthController::class, 'refresh']);
     $router->add('POST', '/api/auth/logout', [AuthController::class, 'logout']);
 
-    /* Analysis Module */
+    /* Analytics Pipeline Module */
     $router->add('POST', '/api/analysis/start', [AnalysisController::class, 'start']);
     $router->add('GET', '/api/analysis/history', [AnalysisController::class, 'history']);
     $router->add('DELETE', '/api/analysis/history/{id}', [AnalysisController::class, 'deleteHistory']);
     $router->add('GET', '/api/analysis/stream', [AnalysisController::class, 'stream']);
 
-    /* AI Module */
+    /* LLM Integration Module */
     $router->add('POST', '/api/ai/analyze-result', [AiController::class, 'analyzeResult']);
 
-    /* Subscription Module */
+    /* Billing & Subscriptions Module */
     $router->add('POST', '/api/subscription/upgrade', [SubscriptionController::class, 'upgrade']);
 
-    /* Admin Module */
+    /* Administrative Module */
     $router->add('GET', '/api/admin/users', [AdminController::class, 'getUsers']);
     $router->add('PUT', '/api/admin/users/{id}', [AdminController::class, 'updateUser']);
     $router->add('DELETE', '/api/admin/users/{id}', [AdminController::class, 'deleteUser']);
     $router->add('GET', '/api/admin/stats', [AdminController::class, 'getStats']);
 
     /* =========================================
-     * DISPATCH REQUEST
+     * DISPATCH PROCESSOR
      * ========================================= */
     $method = $_SERVER['REQUEST_METHOD'];
     
     $router->dispatch($method, $uriPath);
 
 } catch (\Throwable $e) {
-    /* Global Error Handler */
+    /* Global Catch-all Error Handling */
     http_response_code(500);
     echo json_encode([
         "error" => "System Error",
         "details" => $e->getMessage(),
-        "hint" => "Check your PSR-4 namespaces and file names."
+        "hint" => "Check your PSR-4 namespaces and execution environment."
     ]);
     exit;
 }

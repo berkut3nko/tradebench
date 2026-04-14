@@ -8,7 +8,7 @@ use App\Core\AuthMiddleware;
 use App\Services\AiService;
 
 /**
- * Controller for handling AI insights generation
+ * @brief Controller for handling AI insight generation logic and permission enforcement.
  */
 class AiController {
     
@@ -21,14 +21,14 @@ class AiController {
     }
 
     /**
-     * Analyzes backtest results using Gemini AI
+     * @brief Analyzes historical backtest results and queries Google Gemini for professional insights.
      */
     public function analyzeResult(): void {
         $authData = AuthMiddleware::authenticate();
         $userRole = $authData['role'];
         
         if (!in_array($userRole, ['pro', 'admin'])) {
-            Response::error("Ця функція доступна лише для користувачів з підпискою PRO.", 403);
+            Response::error("This feature is restricted to PRO accounts.", 403);
         }
 
         $input = json_decode(file_get_contents('php://input'), true);
@@ -36,7 +36,7 @@ class AiController {
         $isOptimized = $input['is_optimized'] ?? false;
 
         if (empty($taskId)) {
-            Response::error("Task ID не вказано.", 400);
+            Response::error("Task ID missing from request.", 400);
         }
 
         $stmt = $this->db->prepare("
@@ -49,7 +49,7 @@ class AiController {
         $task = $stmt->fetch();
 
         if (!$task) {
-            Response::error("Завдання не знайдено або у вас немає доступу.", 404);
+            Response::error("Task not found or access denied.", 404);
         }
 
         $resultData = json_decode($task['result_data'], true);
@@ -60,47 +60,47 @@ class AiController {
         }
         
         $pair = $task['pair'];
-        $timeframe = $resultData['timeframe'] ?? 'Невідомо';
-        $strategy = $resultData['strategy'] ?? 'Невідомо';
+        $timeframe = $resultData['timeframe'] ?? 'Unknown';
+        $strategy = $resultData['strategy'] ?? 'Unknown';
         $profit = number_format($resultData['profit'] ?? 0, 2);
         $winRate = number_format($resultData['win_rate'] ?? 0, 1);
         $drawdown = number_format($resultData['drawdown'] ?? 0, 1);
         $trades = $resultData['trades'] ?? 0;
 
         $timestamps = $resultData['timestamps'] ?? [];
-        $periodString = "Невідомо";
+        $periodString = "Unknown";
         if (!empty($timestamps)) {
             $startTs = $timestamps[0];
             $endTs = $timestamps[count($timestamps) - 1];
             $periodString = date('d.m.Y', $startTs) . " - " . date('d.m.Y', $endTs);
         }
 
-        // ВАЖЛИВО: Новий, глибокий та професійний промпт для кількісного аналізу
-        $prompt = "Ти — Senior Quant Analyst. Твоя мета — дати глибоку експертну оцінку результатам історичного тестування алгоритму. 
-        Дані симуляції:
-        - Пара: {$pair}, Період: {$periodString}, Таймфрейм: {$timeframe}
-        - Стратегія: {$strategy}
-        - Прибуток: {$profit}$, Угод: {$trades}, Win Rate: {$winRate}%, Просідання (Drawdown): {$drawdown}%
+        // IMPORTANT: Advanced, deep and professional prompt formulation for quantitative analysis
+        $prompt = "You are a Senior Quant Analyst. Your objective is to provide a deep expert assessment of a historical algorithm simulation. 
+        Simulation data:
+        - Asset: {$pair}, Period: {$periodString}, Timeframe: {$timeframe}
+        - Strategy structure: {$strategy}
+        - PnL: {$profit}$, Trades: {$trades}, Win Rate: {$winRate}%, Maximum Drawdown: {$drawdown}%
         
-        Зроби професійний, змістовний висновок (4-5 речень) українською мовою. ";
+        Generate a professional, substantive conclusion (4-5 sentences) in Ukrainian. ";
 
         if ($isOptimized) {
             $prompt .= "
-            Контекст: Ці параметри були знайдені еволюційним Генетичним алгоритмом, який перебрав тисячі комбінацій.
-            Твоє завдання: 
-            1. Поясни, що алгоритм зміг ідеально адаптуватися під ринковий цикл вказаного періоду.
-            2. Оціни профіль ризику: чи виправдовує отриманий прибуток таке максимальне просідання ({$drawdown}%)?
-            3. Зроби припущення, які саме ринкові умови (висока/низька волатильність, тренд чи боковик) дозволили цій оптимізованій стратегії показати такий результат. Не пиши про 'малу вибірку' або 'overfit', оскільки це результат навмисного глибокого пошуку.";
+            Context: These parameters were discovered by an Evolutionary Genetic algorithm that iterated over thousands of combinations.
+            Your task: 
+            1. Explain that the algorithm adapted perfectly to the market cycle during this period.
+            2. Evaluate the risk profile: does the acquired PnL justify the maximum drawdown ({$drawdown}%)?
+            3. Make an assumption regarding the market conditions (volatility, trending vs ranging) that allowed this optimized strategy to thrive. Do not mention 'small sample size' or 'overfitting' since this is an intended result of deep search parameters.";
         } else {
             $prompt .= "
-            Твоє завдання:
-            1. Проаналізуй логіку ринку: враховуючи специфіку стратегії (наприклад, SMA/MACD працюють у тренді, а RSI/Bollinger - у флеті/боковику) та фінальний прибуток, припусти, у якій фазі перебував ринок у вказаний період. Якщо стратегія дала мінус, прямо скажи, що ринкова фаза не відповідала типу стратегії (наприклад, 'ймовірно ринок був у боковику, що згенерувало хибні сигнали для MACD').
-            2. Оціни ризик-менеджмент: проаналізуй співвідношення Drawdown ({$drawdown}%) до прибутку. Чи є ця система стабільною?
-            3. Статистична валідність: Якщо угод менше 15-20, попередь трейдера, що вибірка занадто мала, щоб робити висновки про надійність алгоритму, і є високий ризик випадковості.
-            Твоя відповідь має допомогти трейдеру зрозуміти механіку ринку.";
+            Your task:
+            1. Analyze market logic: considering the specifics of the strategy (e.g., SMA/MACD succeed in trends, while RSI/Bollinger succeed in ranging markets) and the final PnL, hypothesize the dominant market phase during the specified period. If the strategy lost money, explicitly state that the market phase contradicted the strategy archetype.
+            2. Assess Risk Management: analyze the ratio of Drawdown ({$drawdown}%) to PnL. Is this system robust?
+            3. Statistical Validity: If trades are fewer than 15-20, warn the trader that the sample is too small to draw conclusions about algorithmic reliability, indicating a high risk of variance.
+            Your response must clarify market mechanics for the trader.";
         }
 
-        $prompt .= " Уникай загальних фраз. Пиши як професіонал для професіонала. Форматування: простий текст без Markdown (без символів * чи #).";
+        $prompt .= " Avoid generic phrases. Write as a professional addressing another professional. Formatting requirement: plain text, strictly no Markdown (no * or # symbols).";
 
         try {
             $insight = $this->aiService->generateInsight($prompt);
