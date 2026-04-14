@@ -53,6 +53,8 @@ target_link_libraries(core_logic
     ${hiredis_LIBRARIES}
     Threads::Threads
     grpc++
+    grpc
+    gpr
     protobuf
 )
 
