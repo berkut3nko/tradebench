@@ -19,6 +19,8 @@ services:
     build:
       context: ./cpp-core
       dockerfile: dockerfile
+    ports:
+      - "50051:50051"
     volumes:
       - ./cpp-core:/app/cpp-core
       - ./proto:/app/proto

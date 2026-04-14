@@ -1,0 +1,6 @@
+name: local
+variables:
+  - secret: true
+    name: jwt_token
+  - name: base_url
+    value: http://localhost:8081

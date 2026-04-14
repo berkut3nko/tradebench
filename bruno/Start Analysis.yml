@@ -1,0 +1,28 @@
+info:
+  name: Start Analysis
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{base_url}}/api/analysis/start"
+  body:
+    type: json
+    data: |-
+      {
+        "pair": "BTCUSDT",
+        "timeframe": "1h",
+        "strategy": "SMA_CROSS",
+        "params": [9, 21],
+        "startDate": "2024-01-01",
+        "endDate": "2024-01-30"
+      }
+  auth:
+    type: bearer
+    token: "{{jwt_token}}"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

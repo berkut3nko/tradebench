@@ -1,0 +1,21 @@
+info:
+  name: gRPC Start Analysis
+  type: grpc
+  seq: 6
+
+grpc:
+  url: localhost:50051
+  method: /analyzer.AnalysisService/StartAnalysis
+  methodType: unary
+  protoFilePath: ../proto/analysis.proto
+  message: |-
+    {
+      "user_id": "1",
+      "currency_pair": "BTCUSDT",
+      "start_timestamp": 1704067200,
+      "end_timestamp": 1706659200,
+      "strategy_name": "SMA_CROSS:9:21",
+      "task_id": "test-grpc-001",
+      "timeframe": "1h"
+    }
+  auth: inherit
