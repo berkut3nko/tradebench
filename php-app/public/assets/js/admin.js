@@ -1,5 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
-    checkAdminAccess();
+    const token = localStorage.getItem('jwt_token');
+    if (!token || localStorage.getItem('user_role') !== 'admin') {
+        alert('Access denied. Administrator privileges required.');
+        window.location.href = 'dashboard';
+        return;
+    }
+    loadStats();
+    loadUsers();
 });
 
 function showNotification(message, isError = false) {
@@ -10,26 +17,8 @@ function showNotification(message, isError = false) {
     setTimeout(() => notif.classList.add('hidden'), 5000);
 }
 
-async function checkAdminAccess() {
-    const token = localStorage.getItem('jwt_token');
-    const role = localStorage.getItem('user_role');
-
-    if (!token || role !== 'admin') {
-        alert('Доступ заборонено. Потрібні права адміністратора.');
-        window.location.href = 'dashboard.php';
-        return;
-    }
-
-    await loadStats();
-    await loadUsers();
-}
-
 async function apiRequest(endpoint, method = 'GET', body = null) {
-    const token = localStorage.getItem('jwt_token');
-    const options = {
-        method: method,
-        headers: { 'Authorization': `Bearer ${token}` }
-    };
+    const options = { method, headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` } };
     if (body) {
         options.headers['Content-Type'] = 'application/json';
         options.body = JSON.stringify(body);
@@ -41,16 +30,14 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
         
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
-                alert('Сесія закінчилась або недостатньо прав.');
-                window.location.href = 'dashboard.php';
-                throw new Error("Unauthorized");
+                alert('Session expired.');
+                window.location.href = 'dashboard';
             }
             throw new Error(data.error || 'API Error');
         }
         return data;
     } catch (error) {
-        showNotification(error.message, true);
-        throw error;
+        showNotification(error.message, true); throw error;
     }
 }
 
@@ -60,106 +47,66 @@ async function loadStats() {
         document.getElementById('statUsers').innerText = stats.total_users;
         document.getElementById('statTasks').innerText = stats.total_analyses_run;
         document.getElementById('statData').innerText = stats.market_data_points;
-    } catch (e) {
-        console.error("Failed to load stats", e);
-    }
+    } catch (e) {}
 }
 
 async function loadUsers() {
     try {
         const users = await apiRequest('/api/admin/users');
         const tbody = document.getElementById('usersTableBody');
-        tbody.innerHTML = '';
+        const currentUserId = JSON.parse(atob(localStorage.getItem('jwt_token').split('.')[1])).sub;
         
-        users.forEach(user => {
+        tbody.innerHTML = users.map(user => {
             const date = new Date(user.created_at).toLocaleString('uk-UA');
+            const roleBadge = user.role === 'admin' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 
+                              user.role === 'pro' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' : 
+                              'bg-gray-600/50 text-gray-300 border-gray-500/50';
             
-            let roleBadge = '';
-            if (user.role === 'admin') {
-                roleBadge = `<span class="bg-red-500/20 text-red-400 px-2 py-1 rounded text-xs font-bold uppercase border border-red-500/30">Admin</span>`;
-            } else if (user.role === 'pro') {
-                roleBadge = `<span class="bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded text-xs font-bold uppercase border border-yellow-500/30">Pro</span>`;
-            } else {
-                roleBadge = `<span class="bg-gray-600/50 text-gray-300 px-2 py-1 rounded text-xs font-bold uppercase border border-gray-500/50">Standard</span>`;
-            }
-
-            let actionBtn = `
-                <div class="flex justify-end gap-3">
-                    <button onclick="openEditModal(${user.id}, '${user.role}')" class="text-blue-400 hover:text-blue-300 font-medium transition flex items-center gap-1" title="Редагувати роль">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                    </button>
-                    <button onclick="deleteUser(${user.id})" class="text-red-400 hover:text-red-300 font-medium transition flex items-center gap-1" title="Видалити">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    </button>
-                </div>
+            const actions = user.id == currentUserId ? `<span class="text-gray-500 italic text-xs">You</span>` : `
+                <button onclick="openEditModal(${user.id}, '${user.role}')" class="text-blue-400 hover:text-blue-300 mr-3">Edit</button>
+                <button onclick="deleteUser(${user.id})" class="text-red-400 hover:text-red-300">Del</button>
             `;
-            
-            const currentUserId = parseJwt(localStorage.getItem('jwt_token')).sub;
-            if (user.id == currentUserId) {
-                actionBtn = `<span class="text-gray-500 italic text-xs">Це ви</span>`;
-            }
 
-            tbody.innerHTML += `
-                <tr class="hover:bg-gray-750 transition-colors">
+            return `
+                <tr class="hover:bg-gray-750 transition-colors border-b border-gray-800">
                     <td class="px-6 py-4 font-mono text-gray-400">${user.id}</td>
                     <td class="px-6 py-4 font-medium text-white">${user.email}</td>
-                    <td class="px-6 py-4">${roleBadge}</td>
+                    <td class="px-6 py-4"><span class="px-2 py-1 rounded text-xs font-bold uppercase border ${roleBadge}">${user.role}</span></td>
                     <td class="px-6 py-4 text-gray-400 text-sm">${date}</td>
-                    <td class="px-6 py-4 text-right">${actionBtn}</td>
-                </tr>
-            `;
-        });
-    } catch (e) {
-        console.error("Failed to load users", e);
-    }
-}
-
-async function deleteUser(userId) {
-    if (!confirm(`Ви впевнені, що хочете видалити користувача ID ${userId}? Всі його бектести також будуть видалені.`)) {
-        return;
-    }
-
-    try {
-        const result = await apiRequest(`/api/admin/users/${userId}`, 'DELETE');
-        showNotification(result.message);
-        loadStats();
-        loadUsers();
+                    <td class="px-6 py-4 text-right">${actions}</td>
+                </tr>`;
+        }).join('');
     } catch (e) {}
 }
 
-function openEditModal(userId, currentRole) {
-    document.getElementById('editUserId').value = userId;
-    document.getElementById('editUserRole').value = currentRole;
+async function deleteUser(id) {
+    if (!confirm(`Delete user ID ${id}?`)) return;
+    try {
+        const res = await apiRequest(`/api/admin/users/${id}`, 'DELETE');
+        showNotification(res.message);
+        loadStats(); loadUsers();
+    } catch (e) {}
+}
+
+function openEditModal(id, role) {
+    document.getElementById('editUserId').value = id;
+    document.getElementById('editUserRole').value = role;
     document.getElementById('editUserModal').classList.remove('hidden');
 }
 
-function closeEditModal() {
-    document.getElementById('editUserModal').classList.add('hidden');
-}
+function closeEditModal() { document.getElementById('editUserModal').classList.add('hidden'); }
 
 async function saveUserEdit() {
-    const userId = document.getElementById('editUserId').value;
-    const newRole = document.getElementById('editUserRole').value;
-
+    const id = document.getElementById('editUserId').value;
+    const role = document.getElementById('editUserRole').value;
     try {
-        const result = await apiRequest(`/api/admin/users/${userId}`, 'PUT', { role: newRole });
-        showNotification(result.message);
-        closeEditModal();
-        loadUsers();
+        const res = await apiRequest(`/api/admin/users/${id}`, 'PUT', { role });
+        showNotification(res.message);
+        closeEditModal(); loadUsers();
     } catch (e) {}
 }
 
 function logout() {
-    apiRequest('/api/auth/logout', 'POST').catch(e => console.error(e));
-    localStorage.removeItem('jwt_token');
-    localStorage.removeItem('user_role');
-    window.location.href = 'dashboard.php';
-}
-
-function parseJwt(token) {
-    try {
-        return JSON.parse(atob(token.split('.')[1]));
-    } catch (e) {
-        return null;
-    }
+    localStorage.clear();
+    window.location.href = 'dashboard';
 }
