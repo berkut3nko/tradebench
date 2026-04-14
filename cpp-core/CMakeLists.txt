@@ -38,16 +38,17 @@ include_directories(include)
 include_directories(${PROTO_SRC_DIR})
 include_directories(${pqxx_INCLUDE_DIRS})
 
-set(SOURCES 
-    src/main.cpp
+# Library for shared logic (so both main and tests can use it)
+add_library(core_logic STATIC 
+    src/database.cpp
+    src/engine.cpp
+    src/grpc_service.cpp
     ${PROTO_GEN_SRC}
     ${GRPC_GEN_SRC}
 )
 
-add_executable(tradebench_core ${SOURCES})
-
-target_link_libraries(tradebench_core 
-    PRIVATE 
+target_link_libraries(core_logic 
+    PUBLIC 
     ${pqxx_LIBRARIES}
     ${hiredis_LIBRARIES}
     Threads::Threads
@@ -55,14 +56,18 @@ target_link_libraries(tradebench_core
     protobuf
 )
 
-enable_testing()
+# Main Executable
+add_executable(tradebench_core src/main.cpp)
+target_link_libraries(tradebench_core PRIVATE core_logic)
 
+# Unit Tests Executable
+enable_testing()
 add_executable(run_tests tests/unit_tests.cpp)
 target_link_libraries(run_tests 
     PRIVATE 
+    core_logic
     GTest::GTest 
     GTest::Main 
-    Threads::Threads
 )
 
 add_test(NAME CoreUnitTests COMMAND run_tests)

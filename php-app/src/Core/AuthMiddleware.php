@@ -18,8 +18,8 @@ class AuthMiddleware {
      * @return array User data ['id', 'role']
      */
     public static function authenticate(?string $tokenFromQuery = null, ?string $requiredRole = null): array {
-        $headers = getallheaders();
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
         $token = null;
 
         if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
@@ -35,20 +35,23 @@ class AuthMiddleware {
         try {
             $secret = $_ENV['JWT_SECRET'];
             $decoded = JWT::decode($token, new Key($secret, 'HS256'));
-            $role = $decoded->role ?? 'standard';
-            
-            if ($requiredRole && $role !== $requiredRole && $role !== 'admin') {
-                Response::error("Forbidden: Insufficient permissions", 403);
-            }
-
-            return [
-                'id' => $decoded->sub,
-                'role' => $role
-            ];
         } catch (ExpiredException $e) {
             Response::error("Unauthorized: Token expired", 401, "TOKEN_EXPIRED");
         } catch (\Exception $e) {
+            // Тепер цей блок перехоплює лише помилки декодування JWT
             Response::error("Unauthorized: Invalid token", 401);
         }
+
+        // ВАЖЛИВО: Перевірка ролей винесена за межі try-catch
+        $role = $decoded->role ?? 'standard';
+        
+        if ($requiredRole && $role !== $requiredRole && $role !== 'admin') {
+            Response::error("Forbidden: Insufficient permissions", 403);
+        }
+
+        return [
+            'id' => $decoded->sub,
+            'role' => $role
+        ];
     }
 }

@@ -26,6 +26,11 @@ class Response {
             $response["details"] = $details;
         }
         echo json_encode($response);
+        
+        if (php_sapi_name() === 'cli') {
+            throw new \Exception($message);
+        }
+        
         exit;
     }
 }

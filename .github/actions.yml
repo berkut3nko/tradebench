@@ -1,4 +1,4 @@
-name: C++ CI (TradeBench)
+name: TradeBench CI/CD
 
 on:
   push:
@@ -7,23 +7,52 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-test:
+  cpp-tests:
+    name: Build & Test C++ Core
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Install Dependencies
+    - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential libgrpc++-dev protobuf-compiler-grpc libpqxx-dev libhiredis-dev libgtest-dev
+        sudo apt-get install -y cmake build-essential libgrpc++-dev protobuf-compiler-grpc libpqxx-dev libhiredis-dev libgtest-dev protobuf-compiler
+
+    - name: Verify Protobuf Compilation
+      run: |
+        mkdir -p cpp-core/proto
+        protoc --proto_path=proto --cpp_out=cpp-core/proto proto/analysis.proto
+        echo "Protobuf files compiled successfully."
 
     - name: Configure CMake
       run: cmake -S cpp-core -B cpp-core/build
 
-    - name: Build
-      run: cmake --build cpp-core/build
+    - name: Build C++ Core & Tests
+      run: cmake --build cpp-core/build -j 4
 
-    - name: Run Unit Tests
+    - name: Run C++ Unit Tests
       run: cd cpp-core/build && ctest --output-on-failure
+
+  php-tests:
+    name: Build & Test PHP Backend
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: grpc, protobuf, pdo_pgsql, redis
+
+    - name: Install Composer Dependencies
+      run: |
+        cd php-app
+        composer install --no-progress --prefer-dist
+
+    - name: Run PHPUnit Tests
+      run: |
+        cd php-app
+        vendor/bin/phpunit tests
