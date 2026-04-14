@@ -10,8 +10,13 @@ file(MAKE_DIRECTORY ${PROTO_SRC_DIR})
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
+
+# Use pkg-config to automatically resolve ALL complex dependencies and Abseil flags
 pkg_check_modules(pqxx REQUIRED libpqxx)
 pkg_check_modules(hiredis REQUIRED hiredis)
+pkg_check_modules(grpc REQUIRED grpc++)
+pkg_check_modules(protobuf REQUIRED protobuf)
+
 find_package(GTest REQUIRED)
 
 find_program(PROTOC_EXECUTABLE protoc)
@@ -37,6 +42,8 @@ add_custom_command(
 include_directories(include)
 include_directories(${PROTO_SRC_DIR})
 include_directories(${pqxx_INCLUDE_DIRS})
+include_directories(${grpc_INCLUDE_DIRS})
+include_directories(${protobuf_INCLUDE_DIRS})
 
 # Library for shared logic (so both main and tests can use it)
 add_library(core_logic STATIC 
@@ -47,15 +54,14 @@ add_library(core_logic STATIC
     ${GRPC_GEN_SRC}
 )
 
+# Link using the variables populated by pkg-config
 target_link_libraries(core_logic 
     PUBLIC 
     ${pqxx_LIBRARIES}
     ${hiredis_LIBRARIES}
+    ${grpc_LIBRARIES}
+    ${protobuf_LIBRARIES}
     Threads::Threads
-    grpc++
-    grpc
-    gpr
-    protobuf
 )
 
 # Main Executable
