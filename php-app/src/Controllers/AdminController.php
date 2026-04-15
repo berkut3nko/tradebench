@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
+use PDO;
 
 /**
  * @brief Controller managing administrative routes and data moderation tools.
@@ -95,17 +96,82 @@ class AdminController {
     }
 
     /**
-     * @brief Computes generalized statistical counters for dashboard telemetry.
+     * @brief Computes generalized statistical counters and weekly load analytics.
      */
     public function getStats(): void {
-        $usersCount = $this->db->query("SELECT COUNT(*) FROM users")->fetchColumn();
-        $tasksCount = $this->db->query("SELECT COUNT(*) FROM analysis_tasks")->fetchColumn();
-        $dataPoints = $this->db->query("SELECT COUNT(*) FROM currency_data")->fetchColumn();
-        
-        Response::json([
-            "total_users" => $usersCount,
-            "total_analyses_run" => $tasksCount,
-            "market_data_points" => $dataPoints
-        ]);
+        try {
+            $usersCount = $this->db->query("SELECT COUNT(*) FROM users")->fetchColumn() ?: 0;
+            $tasksCount = $this->db->query("SELECT COUNT(*) FROM analysis_tasks")->fetchColumn() ?: 0;
+            
+            $dataPoints = 0;
+            try {
+                // This might fail if the currency_data table hasn't been created or migrated yet
+                $dataPoints = $this->db->query("SELECT COUNT(*) FROM currency_data")->fetchColumn() ?: 0;
+            } catch (\Throwable $e) {
+                // Silently ignore missing table to prevent dashboard crash
+            }
+            
+            // Aggregate weekly load analytics grouped by exact date and status
+            $weeklyStmt = $this->db->query("
+                SELECT 
+                    DATE(created_at) as task_date,
+                    status,
+                    COUNT(*) as task_count
+                FROM analysis_tasks
+                WHERE created_at >= CURRENT_DATE - INTERVAL '6 days'
+                GROUP BY DATE(created_at), status
+                ORDER BY DATE(created_at) ASC
+            ");
+            
+            $weeklyDataDb = $weeklyStmt ? $weeklyStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+            $weeklyAnalytics = [
+                'days' => [],
+                'total_map' => [],
+                'completed_map' => []
+            ];
+
+            // Pre-fill the last 7 days to ensure continuous chart data
+            for ($i = 6; $i >= 0; $i--) {
+                $dateStr = date('Y-m-d', strtotime("-$i days"));
+                $displayStr = date('d.m', strtotime("-$i days"));
+                
+                $weeklyAnalytics['days'][] = $displayStr;
+                $weeklyAnalytics['total_map'][$dateStr] = 0;
+                $weeklyAnalytics['completed_map'][$dateStr] = 0;
+            }
+
+            // Map database results to the structured date maps
+            foreach ($weeklyDataDb as $row) {
+                $date = $row['task_date'];
+                $count = (int)$row['task_count'];
+                $status = $row['status'];
+
+                if (isset($weeklyAnalytics['total_map'][$date])) {
+                    $weeklyAnalytics['total_map'][$date] += $count;
+
+                    if ($status === 'COMPLETED') {
+                        $weeklyAnalytics['completed_map'][$date] += $count;
+                    }
+                }
+            }
+            
+            // Prepare final chart structure extracting indexed arrays from maps
+            $finalChartData = [
+                'days' => $weeklyAnalytics['days'],
+                'total' => array_values($weeklyAnalytics['total_map']),
+                'completed' => array_values($weeklyAnalytics['completed_map'])
+            ];
+            
+            Response::json([
+                "total_users" => $usersCount,
+                "total_analyses_run" => $tasksCount,
+                "market_data_points" => $dataPoints,
+                "weekly_chart" => $finalChartData
+            ]);
+            
+        } catch (\Throwable $e) {
+            Response::error("Failed to load statistics: " . $e->getMessage(), 500);
+        }
     }
 }

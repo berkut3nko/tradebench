@@ -469,8 +469,16 @@ function setupEventStream() {
     window.eventSource = new EventSource(`/api/analysis/stream?token=${token}`);
     window.eventSource.onmessage = (e) => {
         const data = JSON.parse(e.data);
-        if (data.task_id === currentTaskId && data.status === 'COMPLETED') {
-            displayedTaskId = data.task_id; displayResults(data); loadHistory();
+        if (data.status === 'COMPLETED') {
+            // Check if user is currently waiting for ANY result to fix race condition
+            const isWaiting = !document.getElementById('processingState').classList.contains('hidden');
+            
+            if (data.task_id === currentTaskId || isWaiting) {
+                currentTaskId = data.task_id;
+                displayedTaskId = data.task_id; 
+                displayResults(data); 
+            }
+            loadHistory();
         }
     };
 }
