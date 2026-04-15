@@ -11,12 +11,23 @@ use App\AnalysisClient;
 class AnalysisClientTest extends TestCase
 {
     /**
+     * @brief Pre-test environment verification.
+     * Checks if required gRPC classes are generated and available before running tests.
+     * @return void
+     */
+    protected function setUp(): void
+    {
+        if (!class_exists('Analyzer\AnalysisServiceClient')) {
+            $this->markTestSkipped('gRPC generated classes (Analyzer\AnalysisServiceClient) are missing in this environment. Skipping test.');
+        }
+    }
+
+    /**
      * @brief Tests if the AnalysisClient handles unreachable gRPC servers correctly.
      * @return void
      */
     public function testRequestAnalysisReturnsFalseOnConnectionFailure(): void
     {
-        // Point to an invalid or unassigned port to force a gRPC connection failure
         $client = new AnalysisClient('localhost:99999');
 
         $result = $client->requestAnalysis(

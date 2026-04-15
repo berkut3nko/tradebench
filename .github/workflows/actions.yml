@@ -49,6 +49,12 @@ jobs:
           cd php-app
           composer install --no-progress --prefer-dist
         
+      - name: Generate PHP Proto Classes
+        run: |
+          sudo apt-get install -y protobuf-compiler
+          mkdir -p php-app/proto
+          protoc --proto_path=proto --php_out=php-app/proto proto/analysis.proto
+        
       - name: Run PHPUnit
         run: |
           cd php-app
