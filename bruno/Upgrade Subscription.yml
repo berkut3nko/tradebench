@@ -1,0 +1,47 @@
+info:
+  name: Upgrade Subscription
+  type: http
+  seq: 8
+
+http:
+  method: POST
+  url: "{{base_url}}/api/subscription/upgrade"
+  body:
+    type: json
+    data: |-
+      {
+        "months": 1
+      }
+  auth:
+    type: bearer
+    token: "{{jwt_token}}"
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        let data = res.getBody();
+        
+        // Automatically save the new token that contains the PRO role claim
+        if (data.token) {
+            bru.setEnvVar("jwt_token", data.token);
+            console.log("JWT Token updated to PRO version!");
+        }
+
+tests: |-
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response confirms role upgrade and contains new token", function() {
+    const data = res.getBody();
+    expect(data).to.have.property('token');
+    expect(data).to.have.property('role');
+    expect(data.role).to.equal('pro');
+  });
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

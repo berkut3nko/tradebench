@@ -1,0 +1,17 @@
+info:
+  name: Delete History
+  type: http
+  seq: 12
+
+http:
+  method: DELETE
+  url: "{{base_url}}/api/analysis/history/{{task_id}}"
+  auth:
+    type: bearer
+    token: "{{jwt_token}}"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

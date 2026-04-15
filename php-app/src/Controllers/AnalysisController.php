@@ -5,13 +5,20 @@ namespace App\Controllers;
 use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
+use App\Models\CurrencyData;
 use App\AnalysisClient;
 use App\Services\BinanceService;
 use Predis\Client as RedisClient;
 
+/**
+ * @brief Controller managing algorithmic backtesting processes, history, and real-time streams.
+ */
 class AnalysisController {
     
+    /** @var \PDO Active database connection instance */
     private \PDO $db;
+    
+    /** @var BinanceService Service for fetching external market data */
     private BinanceService $binanceService;
 
     public function __construct() {
@@ -19,6 +26,11 @@ class AnalysisController {
         $this->binanceService = new BinanceService();
     }
 
+    /**
+     * @brief Initiates a new backtesting or optimization task.
+     * Enforces user limits, performs smart data caching, and delegates work to the C++ core.
+     * @return void
+     */
     public function start(): void {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
@@ -38,6 +50,7 @@ class AnalysisController {
         
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
 
+        // Enforce limits based on user role (Standard vs PRO/Admin)
         if ($userRole !== 'pro' && $userRole !== 'admin') {
             if ($daysRequested > 30) {
                 Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
@@ -50,6 +63,7 @@ class AnalysisController {
             }
         }
 
+        // Periodic cleanup: delete tasks and results older than 30 days to free up space
         try {
             $this->db->beginTransaction();
             $oldTasksStmt = $this->db->query("SELECT id FROM analysis_tasks WHERE created_at < NOW() - INTERVAL '30 days'");
@@ -65,30 +79,36 @@ class AnalysisController {
             if ($this->db->inTransaction()) $this->db->rollBack();
         }
         
+        // Smart Data Caching: Only fetch from Binance if we don't have enough data locally
         try {
-            $klines = $this->binanceService->fetchHistoricalData(
-                $pair, 
-                $timeframe, 
-                $startTimestamp * 1000, 
-                $endTimestamp * 1000
-            );
-            
-            if (!empty($klines)) {
-                $this->db->beginTransaction();
-                $stmtSync = $this->db->prepare("
-                    INSERT INTO currency_data (pair_name, timeframe, tick_time, open_price, high_price, low_price, close_price, volume)
-                    VALUES (?, ?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
-                    ON CONFLICT (pair_name, timeframe, tick_time) DO NOTHING
-                ");
-                foreach ($klines as $candle) {
-                    $stmtSync->execute([$pair, $timeframe, $candle[0] / 1000, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
+            $hasData = CurrencyData::hasSufficientData($pair, $timeframe, $startTimestamp * 1000, $endTimestamp * 1000);
+
+            if (!$hasData) {
+                $klines = $this->binanceService->fetchHistoricalData(
+                    $pair, 
+                    $timeframe, 
+                    $startTimestamp * 1000, 
+                    $endTimestamp * 1000
+                );
+                
+                if (!empty($klines)) {
+                    $this->db->beginTransaction();
+                    $stmtSync = $this->db->prepare("
+                        INSERT INTO currency_data (pair_name, timeframe, tick_time, open_price, high_price, low_price, close_price, volume)
+                        VALUES (?, ?, TO_TIMESTAMP(?), ?, ?, ?, ?, ?)
+                        ON CONFLICT (pair_name, timeframe, tick_time) DO NOTHING
+                    ");
+                    foreach ($klines as $candle) {
+                        $stmtSync->execute([$pair, $timeframe, $candle[0] / 1000, $candle[1], $candle[2], $candle[3], $candle[4], $candle[5]]);
+                    }
+                    $this->db->commit();
                 }
-                $this->db->commit();
             }
         } catch (\Throwable $syncError) {
             if ($this->db->inTransaction()) $this->db->rollBack();
         }
         
+        // Construct the strategy payload string for the C++ engine
         $params = $input['params'] ?? [];
         $strategyPayload = $strategy;
         
@@ -98,11 +118,13 @@ class AnalysisController {
             }
         }
 
+        // Generate a cryptographically secure pseudo-random UUID for the task
         $taskId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
 
         $stmt = $this->db->prepare("INSERT INTO analysis_tasks (id, user_id, pair, status) VALUES (?, ?, ?, 'PENDING')");
         $stmt->execute([$taskId, $userId, $pair]);
 
+        // Dispatch the workload to the gRPC C++ computational core
         $client = new AnalysisClient('cpp-engine:50051');
         $grpcResult = $client->requestAnalysis((string)$userId, $pair, $strategyPayload, $taskId, [
             'start' => $startTimestamp,
@@ -117,9 +139,13 @@ class AnalysisController {
             Response::error("Помилка обчислювального ядра: " . $errorDetails, 500);
         }
 
-        Response::json(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started"], 202);
+        Response::json(["task_id" => $taskId, "status" => "PENDING", "message" => "Analysis started successfully"], 202);
     }
 
+    /**
+     * @brief Retrieves the recent backtesting history for the authenticated user.
+     * @return void
+     */
     public function history(): void {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
@@ -136,6 +162,11 @@ class AnalysisController {
         Response::json($stmt->fetchAll());
     }
 
+    /**
+     * @brief Deletes a specific backtesting task and its associated results.
+     * @param string $taskId The unique identifier of the task to delete.
+     * @return void
+     */
     public function deleteHistory(string $taskId): void {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
@@ -165,6 +196,11 @@ class AnalysisController {
         }
     }
 
+    /**
+     * @brief Establishes a Server-Sent Events (SSE) stream to provide real-time updates via Redis PubSub.
+     * Keeps the connection open and pushes data as soon as the C++ core publishes it.
+     * @return void
+     */
     public function stream(): void {
         $token = $_GET['token'] ?? null;
         AuthMiddleware::authenticate($token);
@@ -181,6 +217,7 @@ class AnalysisController {
         header('Connection: keep-alive');
         header('X-Accel-Buffering: no');
 
+        // Send padding to bypass proxy buffering (e.g., Nginx)
         echo ":" . str_repeat(" ", 2048) . "\n\n";
         echo "event: ping\ndata: connected\n\n";
         flush();
@@ -205,10 +242,13 @@ class AnalysisController {
                     }
                 }
             } catch (\Throwable $e) {
+                // Send keepalive to maintain the connection alive during idle periods
                 echo ": keepalive\n\n";
                 @ob_flush();
                 flush();
+                
                 if (connection_aborted()) break;
+                
                 try {
                     $redis->disconnect();
                     $redis->connect();
