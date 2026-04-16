@@ -1,4 +1,7 @@
-document.addEventListener('DOMContentLoaded', updateUIAuthState);
+document.addEventListener('DOMContentLoaded', () => {
+    updateUIAuthState();
+    checkSystemStatus();
+});
 
 function updateUIAuthState() {
     const token = localStorage.getItem('jwt_token');
@@ -47,5 +50,45 @@ async function handleSubscribe(months) {
     } catch (error) {
         alert(`Помилка: ${error.message}`);
         updateUIAuthState();
+    }
+}
+
+async function checkSystemStatus() {
+    const badge = document.getElementById('coreStatusBadge');
+    const ping = document.getElementById('coreStatusPing');
+    const dot = document.getElementById('coreStatusDot');
+    const text = document.getElementById('coreStatusText');
+
+    if (!badge) return;
+
+    try {
+        const response = await fetch('/api/system/status?t=' + new Date().getTime(), {
+            cache: 'no-store'
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP error! status: ${response.status}`);
+        }
+
+        if (data.cpp_core_active === true) {
+            badge.className = 'inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-900/30 border border-blue-500/30 text-blue-400 text-xs font-bold uppercase mb-8 transition-colors duration-300';
+            ping.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75';
+            dot.className = 'relative inline-flex rounded-full h-2 w-2 bg-blue-500';
+            text.innerText = 'C++ Ядро активно';
+        } else {
+            // Логуємо причину (debug) у консоль браузера
+            console.warn("C++ Core is inactive. Server debug reason:", data.debug);
+            badge.className = 'inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-900/30 border border-red-500/30 text-red-400 text-xs font-bold uppercase mb-8 transition-colors duration-300';
+            ping.className = 'hidden';
+            dot.className = 'relative inline-flex rounded-full h-2 w-2 bg-red-500';
+            text.innerText = 'C++ Ядро недоступне';
+        }
+    } catch (error) {
+        console.error("Помилка з'єднання при перевірці статусу API:", error);
+        badge.className = 'inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-900/30 border border-red-500/30 text-red-400 text-xs font-bold uppercase mb-8 transition-colors duration-300';
+        ping.className = 'hidden';
+        dot.className = 'relative inline-flex rounded-full h-2 w-2 bg-red-500';
+        text.innerText = 'Помилка з\'єднання API';
     }
 }

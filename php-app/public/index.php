@@ -17,6 +17,7 @@ use App\Controllers\AnalysisController;
 use App\Controllers\AdminController;
 use App\Controllers\AiController;
 use App\Controllers\SubscriptionController;
+use App\Controllers\SystemController;
 
 /* ---------------------------------------------------------
  * CORE SETTINGS & CORS CONFIGURATION
@@ -94,6 +95,8 @@ try {
     $router->add('PUT', '/api/admin/users/{id}', [AdminController::class, 'updateUser']);
     $router->add('DELETE', '/api/admin/users/{id}', [AdminController::class, 'deleteUser']);
     $router->add('GET', '/api/admin/stats', [AdminController::class, 'getStats']);
+
+    $router->add('GET', '/api/system/status', [SystemController::class, 'getStatus']);
 
     /* =========================================
      * DISPATCH PROCESSOR

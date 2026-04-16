@@ -109,6 +109,10 @@ docker compose exec db psql -U user -d analyzer_db
   ```bash
   docker compose exec db psql -U user -d analyzer_db -c "UPDATE users SET role = 'admin' WHERE id = 1;"
   ```
+* **Оновлення файлової структури контейнера:**
+  ```bash
+  docker compose exec php-app composer dump-autoload
+  ```
 
 ---
 
