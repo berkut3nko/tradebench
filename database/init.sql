@@ -8,7 +8,6 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ON DELETE CASCADE додано, щоб при видаленні користувача база сама видаляла всі його записи
 CREATE TABLE analysis_tasks (
     id UUID PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -17,7 +16,6 @@ CREATE TABLE analysis_tasks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ON DELETE CASCADE додано для результатів
 CREATE TABLE analysis_results (
     id SERIAL PRIMARY KEY,
     task_id UUID REFERENCES analysis_tasks(id) ON DELETE CASCADE,

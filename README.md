@@ -140,5 +140,8 @@ tradebench/
 └── docker-compose.yml      # Оркестратор інфраструктури
 ```
 
+* **Детальніше на:**
+https://berkut3nko.github.io/tradebench/html/index.html
+
 ---
 *Розроблено в рамках курсового проєкту з архітектури розподілених систем.*
