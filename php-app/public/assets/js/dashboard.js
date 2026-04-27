@@ -1,10 +1,23 @@
+/**
+ * @brief TradeBench Dashboard Application Logic with A/B Comparison Support
+ */
+
 let equityChartInstance = null;
 let currentTaskId = null;
 let displayedTaskId = null;
 let isCurrentTaskOptimized = false; 
 
+// A/B Testing State
+let compareTaskId = null;
+window.appHistory = []; 
+
 document.addEventListener('DOMContentLoaded', () => {
-    if (localStorage.getItem('jwt_token')) showDashboard();
+    if (localStorage.getItem('jwt_token')) {
+        showDashboard();
+    } else {
+        document.getElementById('authView').classList.remove('hidden');
+        document.getElementById('dashboardView').classList.add('hidden');
+    }
     
     const today = new Date().toISOString().split('T')[0];
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -18,8 +31,83 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('startBtn')?.addEventListener('click', () => executeTask(false));
 });
 
+// ==========================================
+// CORE UI & AUTH STATE MANAGEMENT
+// ==========================================
+
+window.handleAuth = async function(type) {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const errEl = document.getElementById('authError');
+    const succEl = document.getElementById('authSuccess');
+    
+    errEl.classList.add('hidden');
+    succEl.classList.add('hidden');
+
+    try {
+        const res = await fetch(`/api/auth/${type}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.error || 'Помилка авторизації');
+        
+        if (type === 'login') {
+            localStorage.setItem('jwt_token', data.token);
+            localStorage.setItem('user_role', data.role);
+            showDashboard();
+        } else {
+            succEl.textContent = 'Реєстрація успішна! Тепер ви можете увійти.';
+            succEl.classList.remove('hidden');
+        }
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+    }
+};
+
+window.logout = function() {
+    localStorage.removeItem('jwt_token');
+    localStorage.removeItem('user_role');
+    window.location.reload();
+};
+
+function showDashboard() {
+    document.getElementById('authView').classList.add('hidden');
+    document.getElementById('dashboardView').classList.remove('hidden');
+    
+    const role = localStorage.getItem('user_role');
+    const badge = document.getElementById('roleBadge');
+    
+    if (role === 'admin') {
+        badge.textContent = 'ADMIN';
+        badge.className = 'px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/50';
+        badge.classList.remove('hidden');
+        document.getElementById('adminPanelBtn')?.classList.remove('hidden');
+    } else if (role === 'pro') {
+        badge.textContent = 'PRO';
+        badge.className = 'px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-purple-500/20 text-purple-400 border border-purple-500/50';
+        badge.classList.remove('hidden');
+        document.getElementById('optimizeBtn')?.classList.remove('hidden');
+        document.getElementById('optimizeDesc')?.classList.remove('hidden');
+        document.getElementById('optimizeProLock')?.classList.add('hidden');
+        document.getElementById('aiProLock')?.classList.add('hidden');
+        document.getElementById('aiContent')?.classList.remove('hidden');
+    } else {
+        badge.textContent = 'STANDARD';
+        badge.className = 'px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-gray-700/50 text-gray-300 border border-gray-600';
+        badge.classList.remove('hidden');
+    }
+    
+    setupEventStream();
+    loadHistory();
+}
+
 function resetDashboardState() {
     currentTaskId = displayedTaskId = null;
+    compareTaskId = null;
     isCurrentTaskOptimized = false;
     
     document.getElementById('completedState').classList.add('hidden');
@@ -34,451 +122,534 @@ function resetDashboardState() {
     ['profitDisplay', 'tradesDisplay', 'winRateDisplay', 'drawdownDisplay'].forEach(id => {
         if(document.getElementById(id)) document.getElementById(id).innerText = '';
     });
-    document.getElementById('activeStrategyDisplay').innerText = 'Strategy';
-
-    document.getElementById('askAiBtn')?.classList.add('hidden');
+    
     const aiResp = document.getElementById('aiResponse');
-    if (aiResp) { aiResp.classList.add('hidden'); aiResp.innerText = ''; }
+    if (aiResp) {
+        aiResp.innerHTML = '';
+        aiResp.classList.add('hidden');
+    }
+    document.getElementById('askAiBtn')?.classList.add('hidden');
     document.getElementById('aiEmptyState')?.classList.remove('hidden');
 }
 
 function renderStrategyParams() {
-    const strategy = document.getElementById('strategy')?.value;
+    const strat = document.getElementById('strategy').value;
     const box = document.getElementById('paramsBox');
-    if (!strategy || !box) return;
+    let html = '';
     
-    const layouts = {
-        'SMA_CROSS': { cols: 2, fields: [{l:'Fast Period', v:9}, {l:'Slow Period', v:21}] },
-        'EMA_CROSS': { cols: 2, fields: [{l:'Fast Period', v:9}, {l:'Slow Period', v:21}] },
-        'RSI': { cols: 3, fields: [{l:'Period', v:14}, {l:'Overbought', v:70}, {l:'Oversold', v:30}] },
-        'MACD': { cols: 3, fields: [{l:'Fast EMA', v:12}, {l:'Slow EMA', v:26}, {l:'Signal EMA', v:9}] },
-        'BOLLINGER': { cols: 2, fields: [{l:'Period', v:20}, {l:'StdDev', v:2.0, step:0.1}] }
-    };
-    
-    const config = layouts[strategy];
-    box.className = `grid grid-cols-${config.cols} gap-4 bg-gray-900/50 p-3 rounded border border-gray-700`;
-    box.innerHTML = config.fields.map((f, i) => `
-        <div>
-            <label class="block text-xs text-gray-400 mb-1">${f.l}</label>
-            <input type="number" id="param${i+1}" value="${f.v}" ${f.step ? `step="${f.step}"` : ''} class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm outline-none focus:border-blue-500">
-        </div>
-    `).join('');
-}
-
-function formatStrategyName(rawName) {
-    if (!rawName) return 'Unknown';
-    if (rawName.includes(':')) {
-        const parts = rawName.split(':');
-        return `${parts[0].replace('_CROSS', ' Crossover')} (${parts.slice(1).join(', ')})`;
+    if (strat === 'SMA_CROSS' || strat === 'EMA_CROSS') {
+        html = `
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block text-xs text-gray-400 mb-1">Fast Window</label><input type="number" id="p_fast" value="9" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+                <div><label class="block text-xs text-gray-400 mb-1">Slow Window</label><input type="number" id="p_slow" value="21" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+            </div>`;
+    } else if (strat === 'RSI') {
+        html = `
+            <div class="grid grid-cols-3 gap-4">
+                <div><label class="block text-xs text-gray-400 mb-1">Period</label><input type="number" id="p_period" value="14" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+                <div><label class="block text-xs text-gray-400 mb-1">Overbought</label><input type="number" id="p_ob" value="70" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+                <div><label class="block text-xs text-gray-400 mb-1">Oversold</label><input type="number" id="p_os" value="30" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+            </div>`;
+    } else if (strat === 'MACD') {
+        html = `
+            <div class="grid grid-cols-3 gap-4">
+                <div><label class="block text-xs text-gray-400 mb-1">Fast</label><input type="number" id="p_fast" value="12" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+                <div><label class="block text-xs text-gray-400 mb-1">Slow</label><input type="number" id="p_slow" value="26" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+                <div><label class="block text-xs text-gray-400 mb-1">Signal</label><input type="number" id="p_signal" value="9" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+            </div>`;
+    } else if (strat === 'BOLLINGER') {
+        html = `
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block text-xs text-gray-400 mb-1">Period</label><input type="number" id="p_period" value="20" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+                <div><label class="block text-xs text-gray-400 mb-1">Std Dev</label><input type="number" step="0.1" id="p_std" value="2.0" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white"></div>
+            </div>`;
     }
-    return rawName;
+    if (box) box.innerHTML = html;
 }
 
-async function handleAuth(action) {
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const err = document.getElementById('authError');
-    const succ = document.getElementById('authSuccess');
-    
-    err.classList.add('hidden'); succ.classList.add('hidden');
-    if (!email || !password) return (err.innerText = "Всі поля обов'язкові", err.classList.remove('hidden'));
+// ==========================================
+// ANALYSIS AND SSE STREAMING
+// ==========================================
 
-    try {
-        const response = await fetch(`/api/auth/${action}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error);
-        
-        if (action === 'register') {
-            succ.innerText = "Успішна реєстрація!"; succ.classList.remove('hidden');
-            document.getElementById('password').value = '';
-        } else { 
-            localStorage.setItem('jwt_token', data.token); 
-            localStorage.setItem('user_role', data.role); 
-            showDashboard(); 
-        }
-    } catch (e) {
-        err.innerText = e.message; err.classList.remove('hidden');
-    }
-}
-
-function showDashboard() {
-    document.getElementById('authView').classList.add('hidden');
-    document.getElementById('dashboardView').classList.remove('hidden');
-    
-    const role = localStorage.getItem('user_role') || 'standard';
-    const isPro = role === 'admin' || role === 'pro';
-    
-    const badge = document.getElementById('roleBadge');
-    badge.classList.remove('hidden');
-    badge.innerText = role.toUpperCase();
-    
-    document.getElementById('adminPanelBtn')?.classList.toggle('hidden', role !== 'admin');
-    document.getElementById('aiProLock')?.classList.toggle('hidden', isPro);
-    document.getElementById('aiContent')?.classList.toggle('hidden', !isPro);
-    document.getElementById('optimizeProLock')?.classList.toggle('hidden', isPro);
-    document.getElementById('optimizeBtn')?.classList.toggle('hidden', !isPro);
-    document.getElementById('optimizeDesc')?.classList.toggle('hidden', !isPro);
-
-    setupEventStream();
-    loadHistory();
-}
-
-function logout() {
-    localStorage.clear();
-    window.location.reload();
-}
-
-async function loadHistory() {
+function setupEventStream() {
     const token = localStorage.getItem('jwt_token');
     if (!token) return;
-    try {
-        const res = await fetch('/api/analysis/history', { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
-        
-        document.getElementById('historyTableBody').innerHTML = data.map(task => {
-            const rd = task.result_data ? JSON.parse(task.result_data) : null;
-            const isAct = task.task_id === displayedTaskId;
-            const profitStr = rd ? `${rd.profit >= 0 ? '+' : ''}$${rd.profit.toFixed(2)}` : '-';
-            const stratStr = rd ? `[${rd.timeframe||''}] ${formatStrategyName(rd.strategy)} ${rd.is_optimized?'🧬':''} ${rd.ai_insight?'✨':''}` : '';
+    
+    if (window.eventSource) window.eventSource.close();
+    
+    window.eventSource = new EventSource(`/api/analysis/stream?token=${token}`);
+    window.eventSource.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.status === 'COMPLETED') {
+            const isWaiting = !document.getElementById('processingState').classList.contains('hidden');
             
-            const btnHtml = isAct ? 
-                `<span class="text-blue-400 text-xs bg-blue-900/30 px-3 py-1.5 rounded border border-blue-500 font-bold uppercase tracking-wider">Активний</span>` : 
-                (rd ? `<button onclick='viewHistoricalChart(this, "${task.task_id}")' data-result='${task.result_data.replace(/'/g, "&#39;")}' class="bg-gray-700 hover:bg-blue-600 px-3 py-1.5 rounded text-xs font-bold mr-3 transition duration-200 shadow">Переглянути</button>` : '');
-
-            const trashIcon = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
-
-            /* Correct Win Rate styling based on trades count */
-            const wrColor = (rd?.trades > 0) ? (rd.win_rate >= 50 ? 'text-green-400' : 'text-red-400') : 'text-gray-500';
-
-            return `
-                <tr class="${isAct ? 'bg-gray-800/90' : 'hover:bg-gray-750'} transition-colors">
-                    <td class="px-4 py-4 text-gray-300 ${isAct ? 'border-l-4 border-blue-500' : 'border-l-4 border-transparent'}">${new Date(task.created_at).toLocaleString('uk-UA')}</td>
-                    <td class="px-4 py-4 font-bold text-white">${task.pair}</td>
-                    <td class="px-4 py-4 font-mono text-xs text-gray-300">${stratStr}</td>
-                    <td class="px-4 py-4 font-bold ${rd?.profit >= 0 ? 'text-green-400' : 'text-red-400'}">${profitStr}</td>
-                    <td class="px-4 py-4 font-bold ${wrColor}">${rd?.win_rate?.toFixed(1) || '-'}%</td>
-                    <td class="px-4 py-4 text-right flex justify-end items-center">
-                        ${btnHtml}
-                        <button onclick='deleteBacktest("${task.task_id}")' class="text-red-400 hover:text-red-300 transition p-1" title="Видалити бектест">
-                            ${trashIcon}
-                        </button>
-                    </td>
-                </tr>`;
-        }).join('');
-    } catch (e) {}
+            if (data.task_id === currentTaskId || isWaiting) {
+                currentTaskId = data.task_id;
+                displayedTaskId = data.task_id; 
+                
+                // Завантажуємо свіжі дані та одразу оновлюємо інтерфейс
+                loadHistory().then(() => {
+                    const latestTask = window.appHistory.find(t => t.task_id === data.task_id);
+                    if (latestTask) {
+                        let res = typeof latestTask.result_data === 'string' ? JSON.parse(latestTask.result_data) : latestTask.result_data;
+                        displayResults(res);
+                    }
+                });
+            } else {
+                loadHistory();
+            }
+        }
+    };
 }
 
-async function deleteBacktest(taskId) {
-    if (!confirm('Ви впевнені, що хочете видалити цей бектест?')) return;
-    try {
-        await fetch(`/api/analysis/history/${taskId}`, {
-            method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` }
-        });
-        if (taskId === displayedTaskId || taskId === currentTaskId) resetDashboardState();
-        loadHistory();
-    } catch (e) {}
-}
-
-window.viewHistoricalChart = function(btn, taskId) {
-    displayedTaskId = taskId; 
-    const resultData = JSON.parse(btn.getAttribute('data-result'));
-    isCurrentTaskOptimized = resultData.is_optimized === true;
-    displayResults(resultData);
-    loadHistory();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-};
-
-async function executeTask(isOptimized) {
+async function executeTask(isOptimize = false) {
     const pair = document.getElementById('pair').value;
     const timeframe = document.getElementById('timeframe').value;
-    const strategy = isOptimized ? 'OPTIMIZE' : document.getElementById('strategy').value;
-    const startDate = document.getElementById('startDate').value;
-    const endDate = document.getElementById('endDate').value;
+    const strat = document.getElementById('strategy').value;
+    const start = document.getElementById('startDate').value;
+    const end = document.getElementById('endDate').value;
     
-    let params = [];
-    if (!isOptimized) {
-        [1, 2, 3].forEach(i => {
-            const p = document.getElementById(`param${i}`);
-            if (p) params.push(p.value);
-        });
+    let strategyPayload = isOptimize ? "OPTIMIZE" : strat;
+    
+    if (!isOptimize) {
+        if (strat === 'SMA_CROSS' || strat === 'EMA_CROSS') {
+            strategyPayload += `:${document.getElementById('p_fast').value}:${document.getElementById('p_slow').value}`;
+        } else if (strat === 'RSI') {
+            strategyPayload += `:${document.getElementById('p_period').value}:${document.getElementById('p_ob').value}:${document.getElementById('p_os').value}`;
+        } else if (strat === 'MACD') {
+            strategyPayload += `:${document.getElementById('p_fast').value}:${document.getElementById('p_slow').value}:${document.getElementById('p_signal').value}`;
+        } else if (strat === 'BOLLINGER') {
+            strategyPayload += `:${document.getElementById('p_period').value}:${document.getElementById('p_std').value}`;
+        }
     }
-
-    resetDashboardState();
-    isCurrentTaskOptimized = isOptimized;
-    
-    document.getElementById('idleState').classList.add('hidden');
-    document.getElementById('processingState').classList.remove('hidden');
-    document.getElementById('processingTitle').innerHTML = isOptimized ? '<span class="text-purple-400">🧬 Evolution Engine Running</span>' : 'Обчислення в C++ Ядрі';
-    
-    document.getElementById('startBtn').disabled = true;
-    if (document.getElementById('optimizeBtn')) document.getElementById('optimizeBtn').disabled = true;
 
     try {
         const response = await fetch('/api/analysis/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` },
-            body: JSON.stringify({ pair, timeframe, strategy, params, startDate, endDate })
+            body: JSON.stringify({
+                pair: pair, timeframe: timeframe, start_time: start, end_time: end, strategy: strategyPayload
+            })
         });
         
-        if (response.status === 401) { logout(); return; }
         const data = await response.json();
-        
-        if (!response.ok) {
-            alert(response.status === 403 ? `🛑 Відмовлено в доступі:\n${data.error}` : data.error);
-            throw new Error();
-        }
-        
+        if (!response.ok) throw new Error(data.error);
+
         currentTaskId = data.task_id;
-        document.getElementById('taskIdDisplay').innerText = `ID Завдання: ${currentTaskId}`;
+        
+        document.getElementById('idleState').classList.add('hidden');
+        document.getElementById('completedState').classList.add('hidden');
+        document.getElementById('processingState').classList.remove('hidden');
+        document.getElementById('taskIdDisplay').innerText = `ID Завдання: ${data.task_id}`;
+        
+        document.getElementById('aiEmptyState')?.classList.remove('hidden');
+        document.getElementById('askAiBtn')?.classList.add('hidden');
+        document.getElementById('aiResponse')?.classList.add('hidden');
+        
+        loadHistory();
+        
     } catch (e) {
-        resetDashboardState();
-        document.getElementById('startBtn').disabled = false;
-        if (document.getElementById('optimizeBtn')) document.getElementById('optimizeBtn').disabled = false;
+        alert(`Помилка виконання: ${e.message}`);
     }
 }
 
-window.startOptimization = () => executeTask(true);
+window.startOptimization = function() {
+    executeTask(true);
+};
 
-function renderChart(equityData, buySignals = [], sellSignals = [], timestamps = []) {
-    const ctx = document.getElementById('equityChart').getContext('2d');
-    if (equityChartInstance) equityChartInstance.destroy();
+// ==========================================
+// HISTORY AND A/B TESTING LOGIC
+// ==========================================
 
-    /* Determine line segment colors based on trade profitability */
-    const segmentColors = new Array(equityData.length).fill('#4b5563'); /* Default Gray (No active trade) */
-    let activeBuyIdx = -1;
+async function loadHistory() {
+    try {
+        const res = await fetch('/api/analysis/history', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        
+        window.appHistory = data;
+        renderHistoryTable();
+    } catch (e) {
+        console.error("History fetch error:", e);
+    }
+}
 
-    for (let i = 0; i < equityData.length; i++) {
-        if (buySignals.includes(i)) {
-            activeBuyIdx = i;
+function isComparable(current, candidate) {
+    if (!current || !candidate || current.task_id === candidate.task_id) return false;
+    if (current.status !== 'COMPLETED' || candidate.status !== 'COMPLETED') return false;
+    if (current.pair !== candidate.pair) return false;
+
+    try {
+        const r1 = typeof current.result_data === 'string' ? JSON.parse(current.result_data) : (current.result_data || {});
+        const r2 = typeof candidate.result_data === 'string' ? JSON.parse(candidate.result_data) : (candidate.result_data || {});
+
+        if (r1.timeframe !== r2.timeframe) return false;
+        
+        const t1 = r1.timestamps || [];
+        const t2 = r2.timestamps || [];
+        if (t1.length === 0 || t2.length === 0) return false;
+        
+        return t1[0] === t2[0] && t1[t1.length - 1] === t2[t2.length - 1];
+    } catch (e) { return false; }
+}
+
+function renderHistoryTable() {
+    const tbody = document.getElementById('historyTableBody');
+    if (!tbody) return;
+
+    const currentTask = window.appHistory.find(t => t.task_id === displayedTaskId);
+
+    tbody.innerHTML = window.appHistory.map(task => {
+        let res = {};
+        if (task.status === 'COMPLETED' && task.result_data) {
+            try { res = typeof task.result_data === 'string' ? JSON.parse(task.result_data) : task.result_data; } catch(e){}
         }
-        if (sellSignals.includes(i) && activeBuyIdx !== -1) {
-            let isProfit = equityData[i] >= equityData[activeBuyIdx];
-            let color = isProfit ? '#10b981' : '#ef4444'; /* Green or Red segment */
-            for (let j = activeBuyIdx; j < i; j++) {
-                segmentColors[j] = color;
-            }
-            activeBuyIdx = -1;
+
+        const dateStr = new Date(task.created_at).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        
+        const isCurrent = displayedTaskId === task.task_id;
+        const isCompare = compareTaskId === task.task_id;
+        const canCompare = isComparable(currentTask, task);
+
+        let actionHtml = `<button onclick="viewHistoryTask('${task.task_id}')" class="text-blue-400 hover:text-blue-300 mr-2 transition text-xs font-semibold uppercase">Огляд</button>`;
+
+        if (isCurrent) {
+            actionHtml = `<span class="text-green-500 font-bold mr-3 text-[10px] uppercase tracking-wider bg-green-500/10 px-2 py-1 rounded">Основа</span>`;
+        } else if (isCompare) {
+            actionHtml += `<button onclick="clearCompare()" class="text-red-400 hover:text-red-300 font-bold transition text-[10px] uppercase bg-red-400/10 px-2 py-1 rounded border border-red-500/20">× Скинути A/B</button>`;
+        } else if (canCompare) {
+            actionHtml += `<button onclick="setCompare('${task.task_id}')" class="text-orange-400 hover:text-orange-300 font-bold transition text-[10px] uppercase bg-orange-400/10 px-2 py-1 rounded border border-orange-500/30 shadow-sm hover:shadow-orange-500/20">A/B Порівняти</button>`;
         }
+
+        const stratName = res.strategy || '-';
+        const profit = res.profit !== undefined ? `$${parseFloat(res.profit).toFixed(2)}` : '-';
+        const winRate = res.win_rate !== undefined ? `${parseFloat(res.win_rate).toFixed(2)}%` : '-';
+        
+        let statusColor = 'text-gray-400';
+        if (task.status === 'COMPLETED') statusColor = parseFloat(res.profit) >= 0 ? 'text-green-400' : 'text-red-400';
+        else if (task.status === 'PENDING') statusColor = 'text-yellow-400';
+
+        const rowBg = isCurrent ? 'bg-blue-900/10' : (isCompare ? 'bg-orange-900/10' : '');
+
+        return `
+            <tr class="border-b border-gray-800 hover:bg-gray-800/40 transition ${rowBg}">
+                <td class="px-4 py-3 text-gray-500 text-xs">${dateStr}</td>
+                <td class="px-4 py-3 font-bold">${task.pair}</td>
+                <td class="px-4 py-3"><span class="bg-gray-800 border border-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-mono">${stratName}</span></td>
+                <td class="px-4 py-3 font-semibold ${statusColor}">${task.status === 'COMPLETED' ? profit : task.status}</td>
+                <td class="px-4 py-3 text-gray-300">${winRate}</td>
+                <td class="px-4 py-3 text-right">${actionHtml}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+window.viewHistoryTask = function(taskId) {
+    const task = window.appHistory.find(t => t.task_id === taskId);
+    if (!task || task.status !== 'COMPLETED') return;
+    
+    let res = typeof task.result_data === 'string' ? JSON.parse(task.result_data) : task.result_data;
+    
+    displayedTaskId = taskId;
+    isCurrentTaskOptimized = res.is_optimized || false;
+    compareTaskId = null;
+    
+    displayResults(res);
+    renderHistoryTable();
+};
+
+window.setCompare = function(taskId) {
+    compareTaskId = taskId;
+    
+    const baseTask = window.appHistory.find(t => t.task_id === displayedTaskId);
+    const compTask = window.appHistory.find(t => t.task_id === taskId);
+    
+    if (baseTask && compTask) {
+        const r1 = typeof baseTask.result_data === 'string' ? JSON.parse(baseTask.result_data) : baseTask.result_data;
+        const r2 = typeof compTask.result_data === 'string' ? JSON.parse(compTask.result_data) : compTask.result_data;
+        displayResults(r1, r2);
+    }
+    renderHistoryTable();
+};
+
+window.clearCompare = function() {
+    compareTaskId = null;
+    const baseTask = window.appHistory.find(t => t.task_id === displayedTaskId);
+    if (baseTask) {
+        const r1 = typeof baseTask.result_data === 'string' ? JSON.parse(baseTask.result_data) : baseTask.result_data;
+        displayResults(r1);
+    }
+    renderHistoryTable();
+};
+
+// ==========================================
+// RESULTS RENDERING & CHARTING
+// ==========================================
+
+function displayResults(data, compareData = null) {
+    if (!data) return;
+
+    document.getElementById('processingState').classList.add('hidden');
+    document.getElementById('idleState').classList.add('hidden');
+    document.getElementById('completedState').classList.remove('hidden');
+    
+    const activeDisplay = document.getElementById('activeStrategyDisplay');
+    if (activeDisplay) {
+        activeDisplay.innerHTML = compareData 
+            ? `A/B Тест: <span class="text-white">${data.strategy}</span> vs <span class="text-orange-400">${compareData.strategy}</span>`
+            : `Стратегія: <span class="text-white">${data.strategy}</span> ${data.is_optimized ? '<span class="text-yellow-400 ml-2">⚡ ОПТИМІЗОВАНО</span>' : ''}`;
+    }
+
+    updateStatCard('profitDisplay', data.profit, compareData?.profit, true, '');
+    updateStatCard('tradesDisplay', data.trades, compareData?.trades, false, '', true); // Is integer
+    updateStatCard('winRateDisplay', data.win_rate, compareData?.win_rate, false, '%');
+    updateStatCard('drawdownDisplay', data.drawdown, compareData?.drawdown, false, '%');
+
+    renderComparisonChart(data, compareData);
+
+    document.getElementById('aiEmptyState')?.classList.add('hidden');
+    document.getElementById('askAiBtn')?.classList.remove('hidden');
+    
+    const aiResp = document.getElementById('aiResponse');
+    if (aiResp && !compareData) {
+        if (data.ai_insight) {
+            aiResp.innerHTML = data.ai_insight.replace(/\n/g, '<br>');
+            aiResp.classList.remove('hidden');
+            document.getElementById('askAiBtn').classList.add('hidden');
+        } else {
+            aiResp.classList.add('hidden');
+        }
+    } else if (compareData && aiResp) {
+         aiResp.classList.add('hidden');
+         document.getElementById('askAiBtn').classList.add('hidden');
+    }
+}
+
+function updateStatCard(elementId, val1, val2, isCurrency = false, suffix = '', isInt = false) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+
+    const formatVal = (v) => {
+        if (isCurrency) return `$${parseFloat(v).toFixed(2)}`;
+        if (isInt) return parseInt(v).toString() + suffix;
+        return parseFloat(v).toFixed(2) + suffix;
+    };
+
+    const v1Num = parseFloat(val1);
+    
+    let colorClass = 'text-white';
+    if (isCurrency) colorClass = v1Num >= 0 ? 'text-green-400' : 'text-red-400';
+    else if (elementId === 'winRateDisplay') colorClass = 'text-green-400';
+    else if (elementId === 'drawdownDisplay') colorClass = 'text-red-400';
+    else if (elementId === 'tradesDisplay') colorClass = 'text-blue-400';
+
+    let html = `<span class="${colorClass}">${val1 !== undefined ? formatVal(val1) : '-'}</span>`;
+
+    if (val2 !== undefined && val2 !== null) {
+        html += `<div class="text-xs mt-1 font-normal flex items-center justify-center gap-1">
+                    <span class="text-gray-500 italic">vs</span>
+                    <span class="text-orange-400 bg-orange-400/10 px-1.5 py-0.5 rounded border border-orange-500/20 shadow-sm">${formatVal(val2)}</span>
+                 </div>`;
     }
     
-    /* Handle unclosed active trade at the end of the data */
-    if (activeBuyIdx !== -1) {
-        let isProfit = equityData[equityData.length - 1] >= equityData[activeBuyIdx];
-        let color = isProfit ? '#10b981' : '#ef4444';
-        for (let j = activeBuyIdx; j < equityData.length - 1; j++) {
-            segmentColors[j] = color;
+    el.innerHTML = html;
+}
+
+function renderComparisonChart(baseData, compareData = null) {
+    const canvas = document.getElementById('equityChart');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (equityChartInstance) {
+        equityChartInstance.destroy();
+    }
+
+    const curve1 = baseData.equity || [];
+    const curve2 = compareData ? (compareData.equity || []) : [];
+    
+    const labels = baseData.timestamps 
+        ? baseData.timestamps.map(t => {
+            const d = new Date(t * 1000);
+            return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth()+1).toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+          }) 
+        : curve1.map((_, i) => `Крок ${i}`);
+
+    // Розпізнаємо сегменти угод для забарвлення лінії
+    const segmentColors = new Array(curve1.length).fill('#6b7280'); // Сірий за замовчуванням
+    
+    if (!compareData && baseData.buy_signals && baseData.sell_signals) {
+        let buyIdx = 0;
+        let sellIdx = 0;
+        while (buyIdx < baseData.buy_signals.length) {
+            let start = baseData.buy_signals[buyIdx];
+            while (sellIdx < baseData.sell_signals.length && baseData.sell_signals[sellIdx] <= start) {
+                sellIdx++;
+            }
+            let end = (sellIdx < baseData.sell_signals.length) ? baseData.sell_signals[sellIdx] : curve1.length - 1;
+            
+            let isProfitable = curve1[end] >= curve1[start];
+            let tradeColor = isProfitable ? '#22c55e' : '#ef4444'; // Зелений (прибуток) або червоний (збиток)
+
+            for (let i = start; i < end; i++) {
+                segmentColors[i] = tradeColor;
+            }
+            buyIdx++;
+            if (sellIdx < baseData.sell_signals.length) sellIdx++;
         }
     }
 
-    /* Determine Point Colors: Blue (Buy), Orange (Sell) */
-    const ptColors = equityData.map((_, i) => {
-        if (buySignals.includes(i) && sellSignals.includes(i)) return '#a855f7'; /* Purple fallback */
-        if (buySignals.includes(i)) return '#3b82f6'; /* Blue for Buy */
-        if (sellSignals.includes(i)) return '#f97316'; /* Orange for Sell */
-        return 'transparent';
-    });
+    // Додаємо точки входу та виходу з угоди тільки для основного графіка (коли немає порівняння A/B)
+    const pointBgColors = [];
+    const pointRadii = [];
+    const pointBorderColors = [];
+    
+    for (let i = 0; i < curve1.length; i++) {
+        if (!compareData && baseData.buy_signals && baseData.buy_signals.includes(i)) {
+            pointBgColors.push('#3b82f6'); // Синій (Вхід / Buy)
+            pointRadii.push(5);
+            pointBorderColors.push('#ffffff');
+        } else if (!compareData && baseData.sell_signals && baseData.sell_signals.includes(i)) {
+            pointBgColors.push('#f97316'); // Помаранчевий (Вихід / Sell)
+            pointRadii.push(5);
+            pointBorderColors.push('#ffffff');
+        } else {
+            pointBgColors.push('#3b82f6');
+            pointRadii.push(0); // Ховаємо звичайні точки
+            pointBorderColors.push('transparent');
+        }
+    }
 
-    const ptRadii = equityData.map((_, i) => {
-        if (sellSignals.includes(i)) return 3; /* Зменшено радіус точок для кращої видимості графіка */
-        if (buySignals.includes(i)) return 3;
-        return 0;
-    });
+    const datasets = [{
+        label: `Основа`,
+        data: curve1,
+        borderColor: compareData ? '#3b82f6' : '#6b7280', 
+        backgroundColor: compareData ? 'transparent' : 'rgba(59, 130, 246, 0.05)', 
+        borderWidth: 2,
+        tension: 0.1,
+        fill: !compareData,
+        pointBackgroundColor: pointBgColors,
+        pointRadius: pointRadii,
+        pointBorderColor: pointBorderColors,
+        pointHoverRadius: 6,
+        segment: compareData ? undefined : {
+            borderColor: ctx => segmentColors[ctx.p0DataIndex] || '#6b7280'
+        }
+    }];
 
-    /* Helper function for precise date formatting */
-    const formatChartDate = (ts) => {
-        const d = new Date(ts * 1000);
-        const day = d.getDate().toString().padStart(2, '0');
-        const month = (d.getMonth() + 1).toString().padStart(2, '0');
-        const hours = d.getHours().toString().padStart(2, '0');
-        const minutes = d.getMinutes().toString().padStart(2, '0');
-        return `${day}.${month} ${hours}:${minutes}`;
-    };
+    if (compareData) {
+        datasets.push({
+            label: `A/B Тест`,
+            data: curve2,
+            borderColor: '#f97316', 
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            borderDash: [5, 5], 
+            tension: 0.1,
+            fill: false,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+    }
 
     equityChartInstance = new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: equityData.map((_, i) => i),
-            datasets: [{
-                label: 'Капітал ($)',
-                data: equityData,
-                /* Apply calculated segment colors */
-                segment: {
-                    borderColor: ctx => segmentColors[ctx.p0DataIndex] || '#4b5563'
-                },
-                borderWidth: 2,
-                pointRadius: ptRadii,
-                pointHoverRadius: 5, /* Трохи збільшується при наведенні миші */
-                pointBackgroundColor: ptColors,
-                pointBorderColor: ptColors.map(c => c === 'transparent' ? 'transparent' : '#ffffff'),
-                pointBorderWidth: 1,
-                fill: false, 
-                tension: 0.1
-            }]
-        },
+        data: { labels, datasets },
         options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { 
-                legend: { display: false },
-                /* Advanced Tooltip formatting for clear insights */
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false, 
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: '#9ca3af', usePointStyle: true, boxWidth: 8 }
+                },
                 tooltip: {
                     backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                    titleColor: '#9ca3af',
-                    bodyColor: '#ffffff',
+                    titleColor: '#fff',
+                    bodyColor: '#cbd5e1',
                     borderColor: '#374151',
                     borderWidth: 1,
                     padding: 12,
-                    displayColors: false,
                     callbacks: {
-                        title: function(context) {
-                            const idx = context[0].dataIndex;
-                            if (timestamps && timestamps.length > idx) {
-                                return formatChartDate(timestamps[idx]);
-                            }
-                            return `Крок ${idx}`;
-                        },
                         label: function(context) {
-                            const idx = context.dataIndex;
-                            const val = context.raw;
-                            let lines = [`Баланс: $${val.toFixed(2)}`];
-                            
-                            if (buySignals.includes(idx)) {
-                                lines.push('🔵 Вхід в угоду (Купівля)');
-                            }
-                            if (sellSignals.includes(idx)) {
-                                /* Find corresponding buy to calculate exact PnL */
-                                let entryVal = val;
-                                for (let k = idx; k >= 0; k--) {
-                                    if (buySignals.includes(k)) {
-                                        entryVal = equityData[k];
-                                        break;
-                                    }
+                            let label = ` ${context.dataset.label}: $${context.parsed.y.toFixed(2)}`;
+                            // Додаємо інформацію про покупку чи продаж у тултип
+                            if (context.datasetIndex === 0 && !compareData) {
+                                if (baseData.buy_signals && baseData.buy_signals.includes(context.dataIndex)) {
+                                    label += ' (🔵 Купівля)';
+                                } else if (baseData.sell_signals && baseData.sell_signals.includes(context.dataIndex)) {
+                                    label += ' (🟠 Продаж)';
                                 }
-                                let diff = val - entryVal;
-                                let sign = diff > 0 ? '+' : '';
-                                let statusMsg = diff > 0 ? 'ПРИБУТКОВО' : (diff < 0 ? 'ЗБИТКОВО' : 'БЕЗ ЗМІН');
-                                lines.push(`🟠 Вихід з угоди (Продаж)`);
-                                lines.push(`💰 Результат: ${sign}$${diff.toFixed(2)} (${statusMsg})`);
                             }
-                            return lines;
+                            return label;
+                        },
+                        footer: function(tooltipItems) {
+                            if (tooltipItems.length === 2) {
+                                const v1 = tooltipItems[0].parsed.y;
+                                const v2 = tooltipItems[1].parsed.y;
+                                const diff = v2 - v1;
+                                const diffClass = diff >= 0 ? '↗' : '↘';
+                                return `\nРізниця (A/B - Основа): ${diffClass} $${Math.abs(diff).toFixed(2)}`;
+                            }
+                            return '';
                         }
                     }
                 }
             },
             scales: {
                 x: { 
+                    grid: { display: false },
+                    ticks: { color: '#6b7280', maxTicksLimit: 8 }
+                },
+                y: { 
+                    grid: { color: 'rgba(55, 65, 81, 0.3)' },
                     ticks: { 
                         color: '#9ca3af',
-                        maxRotation: 45, /* Кут нахилу для дат, щоб не налізали одна на одну */
-                        minRotation: 45,
-                        callback: function(val, i) {
-                            if (!timestamps.length) return i % Math.floor(equityData.length/10) === 0 ? `Step ${i}` : null;
-                            if (i % Math.floor(equityData.length/8) === 0) {
-                                return formatChartDate(timestamps[i]);
-                            }
-                            return null;
-                        }
-                    },
-                    grid: { color: '#374151' }
-                },
-                y: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } }
-            },
-            interaction: {
-                mode: 'index',
-                intersect: false,
+                        callback: (value) => '$' + value 
+                    }
+                }
             }
         }
     });
 }
 
-function displayResults(data) {
-    document.getElementById('idleState').classList.add('hidden');
-    document.getElementById('processingState').classList.add('hidden');
-    document.getElementById('completedState').classList.remove('hidden');
-    
-    document.getElementById('startBtn').disabled = false;
-    if (document.getElementById('optimizeBtn')) document.getElementById('optimizeBtn').disabled = false;
-    
-    document.getElementById('activeStrategyDisplay').innerText = `[${data.timeframe||''}] ${formatStrategyName(data.strategy)}`;
-    
-    const pnl = document.getElementById('profitDisplay');
-    pnl.innerText = `${data.profit >= 0 ? '+' : ''}$${data.profit.toFixed(2)}`;
-    pnl.className = `font-bold text-lg ${data.profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
-    
-    document.getElementById('tradesDisplay').innerText = data.trades || 0;
-    
-    /* Correct Win Rate styling based on trades count */
-    const wr = data.win_rate || 0;
-    const trades = data.trades || 0;
-    const wrDisplay = document.getElementById('winRateDisplay');
-    if (wrDisplay) {
-        wrDisplay.innerText = `${wr.toFixed(1)}%`;
-        if (trades > 0) {
-            wrDisplay.className = `text-lg font-bold ${wr >= 50 ? 'text-green-400' : 'text-red-400'}`;
-        } else {
-            wrDisplay.className = `text-lg font-bold text-gray-500`;
-        }
-    }
+// ==========================================
+// AI INTEGRATION
+// ==========================================
 
-    const ddDisplay = document.getElementById('drawdownDisplay');
-    if (ddDisplay) {
-        ddDisplay.innerText = `-${(data.drawdown||0).toFixed(1)}%`;
-    }
-    
-    if (data.equity?.length > 0) renderChart(data.equity, data.buy_signals, data.sell_signals, data.timestamps);
-
-    if (displayedTaskId && document.getElementById('askAiBtn')) {
-        document.getElementById('aiEmptyState').classList.add('hidden');
-        const aiResp = document.getElementById('aiResponse');
-        if (data.ai_insight) {
-            document.getElementById('askAiBtn').classList.add('hidden');
-            aiResp.classList.remove('hidden');
-            aiResp.innerHTML = data.ai_insight.replace(/\n/g, '<br>');
-        } else {
-            aiResp.classList.add('hidden');
-            document.getElementById('askAiBtn').classList.remove('hidden');
-        }
-    }
-}
-
-async function askAI() {
+window.askAI = async function() {
     if (!displayedTaskId) return;
-    const btn = document.getElementById('askAiBtn'), loader = document.getElementById('aiLoader'), resp = document.getElementById('aiResponse');
     
-    btn.classList.add('hidden'); loader.classList.remove('hidden');
+    const btn = document.getElementById('askAiBtn');
+    const loader = document.getElementById('aiLoader');
+    const resp = document.getElementById('aiResponse');
+    
+    btn.classList.add('hidden');
+    loader.classList.remove('hidden');
+    
     try {
         const res = await fetch('/api/ai/analyze-result', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` },
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` },
             body: JSON.stringify({ task_id: displayedTaskId, is_optimized: isCurrentTaskOptimized })
         });
+        
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         
         resp.innerHTML = data.insight.replace(/\n/g, '<br>');
         resp.classList.remove('hidden');
+        
         loadHistory();
     } catch (e) {
-        btn.classList.remove('hidden'); alert(`AI Помилка: ${e.message}`);
-    } finally { loader.classList.add('hidden'); }
-}
-
-function setupEventStream() {
-    const token = localStorage.getItem('jwt_token');
-    if (!token) return;
-    window.eventSource = new EventSource(`/api/analysis/stream?token=${token}`);
-    window.eventSource.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.status === 'COMPLETED') {
-            // Check if user is currently waiting for ANY result to fix race condition
-            const isWaiting = !document.getElementById('processingState').classList.contains('hidden');
-            
-            if (data.task_id === currentTaskId || isWaiting) {
-                currentTaskId = data.task_id;
-                displayedTaskId = data.task_id; 
-                displayResults(data); 
-            }
-            loadHistory();
-        }
-    };
-}
+        btn.classList.remove('hidden'); 
+        alert(`Помилка AI: ${e.message}`);
+    } finally { 
+        loader.classList.add('hidden'); 
+    }
+};
