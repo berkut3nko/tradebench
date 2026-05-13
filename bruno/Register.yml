@@ -10,7 +10,7 @@ http:
     type: json
     data: |-
       {
-        "email": "ipz243_dos@student.ztu.edu.ua",
+        "email": "test1.student@student.ztu.edu.ua",
         "password": "ab123456"
       }
   auth: inherit

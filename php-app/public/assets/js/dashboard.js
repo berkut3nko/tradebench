@@ -81,6 +81,21 @@ function showDashboard() {
     const role = localStorage.getItem('user_role');
     const badge = document.getElementById('roleBadge');
     
+    // Розблокування PRO-функцій для PRO ТА ADMIN
+    if (role === 'admin' || role === 'pro') {
+        document.getElementById('optimizeBtn')?.classList.remove('hidden');
+        document.getElementById('optimizeDesc')?.classList.remove('hidden');
+        document.getElementById('optimizeProLock')?.classList.add('hidden');
+        document.getElementById('aiProLock')?.classList.add('hidden');
+        
+        const aiContent = document.getElementById('aiContent');
+        if (aiContent) {
+            aiContent.classList.remove('hidden');
+            aiContent.classList.add('flex');
+        }
+    }
+    
+    // Налаштування бейджів та додаткових кнопок
     if (role === 'admin') {
         badge.textContent = 'ADMIN';
         badge.className = 'px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/50';
@@ -90,11 +105,6 @@ function showDashboard() {
         badge.textContent = 'PRO';
         badge.className = 'px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-purple-500/20 text-purple-400 border border-purple-500/50';
         badge.classList.remove('hidden');
-        document.getElementById('optimizeBtn')?.classList.remove('hidden');
-        document.getElementById('optimizeDesc')?.classList.remove('hidden');
-        document.getElementById('optimizeProLock')?.classList.add('hidden');
-        document.getElementById('aiProLock')?.classList.add('hidden');
-        document.getElementById('aiContent')?.classList.remove('hidden');
     } else {
         badge.textContent = 'STANDARD';
         badge.className = 'px-3 py-1 rounded text-xs font-bold uppercase tracking-wider bg-gray-700/50 text-gray-300 border border-gray-600';
@@ -187,7 +197,6 @@ function setupEventStream() {
                 currentTaskId = data.task_id;
                 displayedTaskId = data.task_id; 
                 
-                // Завантажуємо свіжі дані та одразу оновлюємо інтерфейс
                 loadHistory().then(() => {
                     const latestTask = window.appHistory.find(t => t.task_id === data.task_id);
                     if (latestTask) {
@@ -324,6 +333,10 @@ function renderHistoryTable() {
         }
 
         const stratName = res.strategy || '-';
+        // Відновлені іконки AI та Оптимізації
+        const optBadge = res.is_optimized ? `<span title="Оптимізовано еволюційним алгоритмом" class="ml-1 text-yellow-400">⚡</span>` : '';
+        const aiBadge = res.ai_insight ? `<span title="Проаналізовано TradeBench AI" class="ml-1 text-purple-400">✨</span>` : '';
+        
         const profit = res.profit !== undefined ? `$${parseFloat(res.profit).toFixed(2)}` : '-';
         const winRate = res.win_rate !== undefined ? `${parseFloat(res.win_rate).toFixed(2)}%` : '-';
         
@@ -337,7 +350,11 @@ function renderHistoryTable() {
             <tr class="border-b border-gray-800 hover:bg-gray-800/40 transition ${rowBg}">
                 <td class="px-4 py-3 text-gray-500 text-xs">${dateStr}</td>
                 <td class="px-4 py-3 font-bold">${task.pair}</td>
-                <td class="px-4 py-3"><span class="bg-gray-800 border border-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-mono">${stratName}</span></td>
+                <td class="px-4 py-3">
+                    <span class="bg-gray-800 border border-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-mono inline-flex items-center">
+                        ${stratName}${optBadge}${aiBadge}
+                    </span>
+                </td>
                 <td class="px-4 py-3 font-semibold ${statusColor}">${task.status === 'COMPLETED' ? profit : task.status}</td>
                 <td class="px-4 py-3 text-gray-300">${winRate}</td>
                 <td class="px-4 py-3 text-right">${actionHtml}</td>
@@ -403,27 +420,42 @@ function displayResults(data, compareData = null) {
     }
 
     updateStatCard('profitDisplay', data.profit, compareData?.profit, true, '');
-    updateStatCard('tradesDisplay', data.trades, compareData?.trades, false, '', true); // Is integer
+    updateStatCard('tradesDisplay', data.trades, compareData?.trades, false, '', true); 
     updateStatCard('winRateDisplay', data.win_rate, compareData?.win_rate, false, '%');
     updateStatCard('drawdownDisplay', data.drawdown, compareData?.drawdown, false, '%');
 
     renderComparisonChart(data, compareData);
 
-    document.getElementById('aiEmptyState')?.classList.add('hidden');
-    document.getElementById('askAiBtn')?.classList.remove('hidden');
-    
+    // AI Panel UI Logic
+    const aiEmpty = document.getElementById('aiEmptyState');
+    const askBtn = document.getElementById('askAiBtn');
     const aiResp = document.getElementById('aiResponse');
-    if (aiResp && !compareData) {
-        if (data.ai_insight) {
-            aiResp.innerHTML = data.ai_insight.replace(/\n/g, '<br>');
-            aiResp.classList.remove('hidden');
-            document.getElementById('askAiBtn').classList.add('hidden');
-        } else {
-            aiResp.classList.add('hidden');
+    
+    if (compareData) {
+        // У режимі порівняння A/B тимчасово блокуємо AI для уникнення плутанини
+        if (aiEmpty) {
+            aiEmpty.innerText = "ШІ-аналіз тимчасово недоступний в режимі A/B порівняння.";
+            aiEmpty.classList.remove('hidden');
         }
-    } else if (compareData && aiResp) {
-         aiResp.classList.add('hidden');
-         document.getElementById('askAiBtn').classList.add('hidden');
+        if (askBtn) askBtn.classList.add('hidden');
+        if (aiResp) aiResp.classList.add('hidden');
+    } else {
+        // Нормальний режим (без A/B)
+        if (aiEmpty) {
+            aiEmpty.innerText = "Запустіть бектест або виберіть результат з історії, щоб отримати висновок.";
+        }
+        if (data.ai_insight) {
+            if (aiEmpty) aiEmpty.classList.add('hidden');
+            if (askBtn) askBtn.classList.add('hidden');
+            if (aiResp) {
+                aiResp.innerHTML = data.ai_insight.replace(/\n/g, '<br>');
+                aiResp.classList.remove('hidden');
+            }
+        } else {
+            if (aiEmpty) aiEmpty.classList.add('hidden');
+            if (askBtn) askBtn.classList.remove('hidden');
+            if (aiResp) aiResp.classList.add('hidden');
+        }
     }
 }
 
@@ -476,8 +508,7 @@ function renderComparisonChart(baseData, compareData = null) {
           }) 
         : curve1.map((_, i) => `Крок ${i}`);
 
-    // Розпізнаємо сегменти угод для забарвлення лінії
-    const segmentColors = new Array(curve1.length).fill('#6b7280'); // Сірий за замовчуванням
+    const segmentColors = new Array(curve1.length).fill('#6b7280'); 
     
     if (!compareData && baseData.buy_signals && baseData.sell_signals) {
         let buyIdx = 0;
@@ -490,7 +521,7 @@ function renderComparisonChart(baseData, compareData = null) {
             let end = (sellIdx < baseData.sell_signals.length) ? baseData.sell_signals[sellIdx] : curve1.length - 1;
             
             let isProfitable = curve1[end] >= curve1[start];
-            let tradeColor = isProfitable ? '#22c55e' : '#ef4444'; // Зелений (прибуток) або червоний (збиток)
+            let tradeColor = isProfitable ? '#22c55e' : '#ef4444'; 
 
             for (let i = start; i < end; i++) {
                 segmentColors[i] = tradeColor;
@@ -500,23 +531,22 @@ function renderComparisonChart(baseData, compareData = null) {
         }
     }
 
-    // Додаємо точки входу та виходу з угоди тільки для основного графіка (коли немає порівняння A/B)
     const pointBgColors = [];
     const pointRadii = [];
     const pointBorderColors = [];
     
     for (let i = 0; i < curve1.length; i++) {
         if (!compareData && baseData.buy_signals && baseData.buy_signals.includes(i)) {
-            pointBgColors.push('#3b82f6'); // Синій (Вхід / Buy)
+            pointBgColors.push('#3b82f6'); 
             pointRadii.push(5);
             pointBorderColors.push('#ffffff');
         } else if (!compareData && baseData.sell_signals && baseData.sell_signals.includes(i)) {
-            pointBgColors.push('#f97316'); // Помаранчевий (Вихід / Sell)
+            pointBgColors.push('#f97316'); 
             pointRadii.push(5);
             pointBorderColors.push('#ffffff');
         } else {
             pointBgColors.push('#3b82f6');
-            pointRadii.push(0); // Ховаємо звичайні точки
+            pointRadii.push(0); 
             pointBorderColors.push('transparent');
         }
     }
@@ -578,7 +608,6 @@ function renderComparisonChart(baseData, compareData = null) {
                     callbacks: {
                         label: function(context) {
                             let label = ` ${context.dataset.label}: $${context.parsed.y.toFixed(2)}`;
-                            // Додаємо інформацію про покупку чи продаж у тултип
                             if (context.datasetIndex === 0 && !compareData) {
                                 if (baseData.buy_signals && baseData.buy_signals.includes(context.dataIndex)) {
                                     label += ' (🔵 Купівля)';
