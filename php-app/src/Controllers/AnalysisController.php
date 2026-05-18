@@ -6,6 +6,7 @@ use App\Core\Database;
 use App\Core\Response;
 use App\Core\AuthMiddleware;
 use App\Models\CurrencyData;
+use App\Core\UserRole; 
 use App\AnalysisClient;
 use App\Services\BinanceService;
 use Predis\Client as RedisClient;
@@ -34,7 +35,7 @@ class AnalysisController {
     public function start(): void {
         $authData = AuthMiddleware::authenticate();
         $userId = $authData['id'];
-        $userRole = $authData['role'];
+        $userRole = new UserRole($authData['role']);
 
         $input = json_decode(file_get_contents('php://input'), true);
         $pair = $input['pair'] ?? 'BTCUSDT';
@@ -50,20 +51,16 @@ class AnalysisController {
         
         $strategy = $input['strategy'] ?? 'SMA_CROSS';
 
-        // Enforce limits based on user role (Standard vs PRO/Admin)
-        if ($userRole !== 'pro' && $userRole !== 'admin') {
-            if ($daysRequested > 30) {
-                Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
-            }
-            if ($timeframe !== '1h') {
-                Response::error("Custom timeframes are available only for PRO accounts.", 403);
-            }
-            if ($strategy === 'OPTIMIZE') {
-                Response::error("Генетичний автопідбір доступний лише для користувачів з підпискою PRO.", 403);
-            }
+        if ($daysRequested > $userRole->maxBacktestDays()) {
+            Response::error("Standard accounts are limited to 30 days of backtesting.", 403);
         }
-
-        // Periodic cleanup: delete tasks and results older than 30 days to free up space
+        if ($timeframe !== '1h' && !$userRole->canUseCustomTimeframe()) {
+        Response::error("Custom timeframes are available only for PRO accounts.", 403);
+        }
+        if ($strategy === 'OPTIMIZE' && !$userRole->canUseOptimizeStrategy()) {
+            Response::error("Генетичний автопідбір доступний лише для користувачів з підпискою PRO.", 403);
+        }
+        
         try {
             $this->db->beginTransaction();
             $oldTasksStmt = $this->db->query("SELECT id FROM analysis_tasks WHERE created_at < NOW() - INTERVAL '30 days'");
