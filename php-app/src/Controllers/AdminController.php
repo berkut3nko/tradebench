@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Core\Database;
 use App\Core\Response;
+use App\Core\UserRole;    
 use App\Core\AuthMiddleware;
 use PDO;
 
@@ -85,7 +86,7 @@ class AdminController {
         $input = json_decode(file_get_contents('php://input'), true);
         $newRole = $input['role'] ?? null;
         
-        if (!in_array($newRole, ['standard', 'pro', 'admin'])) {
+        if (!in_array($newRole, [UserRole::STANDARD, UserRole::PRO, UserRole::ADMIN], true)) {
             Response::error("Invalid role provided", 400);
         }
         
